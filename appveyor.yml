@@ -1,0 +1,38 @@
+branches:
+  only:
+    - master
+
+os:
+- Visual Studio 2017
+- Visual Studio 2015
+
+platform: x64
+configuration: Release
+
+clone_folder: c:\projects\manif
+
+build:
+  project: c:\projects\manif\build\manif.sln
+
+install:
+  - ps: wget -O eigen3.zip http://bitbucket.org/eigen/eigen/get/3.3-beta1.zip
+  - cmd: 7z x eigen3.zip -o"C:\projects" -y > nul
+  # - cmd: $env:CMAKE_INCLUDE_PATH = "C:\projects\eigen-eigen-ce5a455b34c0;$env:CMAKE_INCLUDE_PATH"
+
+build_script:
+  - cd c:\projects\manif
+  - md build
+  - cd build
+  - cmake -G "Visual Studio 14 2015 Win64" -D EIGEN3_INCLUDE_DIR=C:\projects\eigen-eigen-ce5a455b34c0 -DBUILD_TESTING=ON -DBUILD_EXAMPLES=ON ..
+  - cmake --build .
+
+after_build:
+  - ctest
+
+notifications:
+  - provider: Email
+    to:
+      - deray.jeremie@gmail.com
+    on_build_success: false
+    on_build_failure: true
+    on_build_status_changed: false

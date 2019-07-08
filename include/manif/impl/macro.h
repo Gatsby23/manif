@@ -3,6 +3,18 @@
 
 #include <stdexcept> // for std::runtime_error
 
+#ifdef _MSC_VER
+#  define MANIF_MSC_VER _MSC_VER
+#else
+#  define MANIF_MSC_VER 0
+#endif
+
+#ifdef __has_cpp_attribute
+#  define MANIF_HAS_CPP_ATTRIBUTE(x) __has_cpp_attribute(x)
+#else
+#  define MANIF_HAS_CPP_ATTRIBUTE(x) 0
+#endif
+
 namespace manif {
 namespace detail {
 
@@ -15,7 +27,7 @@ void
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__(( noinline, cold, noreturn ))
 #elif defined(_MSC_VER)
-__declspec( noinline, noreturn)
+__declspec( noinline, noreturn )
 #else
 // nothing
 #endif
@@ -35,15 +47,19 @@ raise(Args&&... args)
 #define MANIF_CHECK(cond, msg) \
   if (!(cond)) MANIF_THROW(msg);
 
-#if defined(__cplusplus) && (__cplusplus >= 201402L)
-  #define MANIF_DEPRECATED [[deprecated]]
-#elif defined(__GNUC__)  || defined(__clang__)
-  #define MANIF_DEPRECATED __attribute__((deprecated))
-#elif defined(_MSC_VER)
-  #define MANIF_DEPRECATED __declspec(deprecated)
-#else
-  #pragma message("WARNING: Deprecation is disabled -- the compiler is not supported.")
-  #define MANIF_DEPRECATED
+#ifndef MANIF_DEPRECATED
+#  if (MANIF_HAS_CPP_ATTRIBUTE(deprecated) && __cplusplus >= 201402L) || MANIF_MSC_VER >= 1900
+#    define MANIF_DEPRECATED [[deprecated]]
+#  else
+#    if defined(__GNUC__) || defined(__clang__)
+#      define MANIF_DEPRECATED __attribute__((deprecated))
+#    elif MANIF_MSC_VER
+#      define MANIF_DEPRECATED __declspec(deprecated)
+#    else
+#      pragma message("WARNING: Deprecation is disabled -- the compiler is not supported.")
+#      define MANIF_DEPRECATED /* deprecated */
+#    endif
+#  endif
 #endif
 
 // LieGroup - related macros

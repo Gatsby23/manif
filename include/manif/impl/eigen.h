@@ -146,8 +146,8 @@ skew(const _Scalar v)
  *             | -v(1) +v(0)  0    |
  */
 template <typename _Derived>
-typename std::enable_if<internal::is_base_of_v<Eigen::MatrixBase<_Derived>, _Derived>()
-                        and _Derived::RowsAtCompileTime == 3,
+typename std::enable_if<(internal::is_base_of_v<Eigen::MatrixBase<_Derived>, _Derived>()
+                         and _Derived::RowsAtCompileTime == 3),
                         Eigen::Matrix<typename _Derived::Scalar, 3, 3>>::type
 skew(const Eigen::MatrixBase<_Derived>& v)
 {

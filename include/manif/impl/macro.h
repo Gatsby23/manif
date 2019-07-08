@@ -5,13 +5,21 @@
 
 namespace manif {
 namespace detail {
+
 template <typename E, typename... Args>
+
 #ifdef _MANIF_COMPILER_SUPPORTS_CONSTEXPR_VOID_
-constexpr void
-#else
-void
+constexpr
 #endif
-__attribute__(( noinline, cold, noreturn )) raise(Args&&... args)
+void
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__(( noinline, cold, noreturn ))
+#elif defined(_MSC_VER)
+__declspec( noinline, noreturn)
+#else
+// nothing
+#endif
+raise(Args&&... args)
 {
   throw E(std::forward<Args>(args)...);
 }
@@ -31,6 +39,8 @@ __attribute__(( noinline, cold, noreturn )) raise(Args&&... args)
   #define MANIF_DEPRECATED [[deprecated]]
 #elif defined(__GNUC__)  || defined(__clang__)
   #define MANIF_DEPRECATED __attribute__((deprecated))
+#elif defined(_MSC_VER)
+  #define MANIF_DEPRECATED __declspec(deprecated)
 #else
   #pragma message("WARNING: Deprecation is disabled -- the compiler is not supported.")
   #define MANIF_DEPRECATED

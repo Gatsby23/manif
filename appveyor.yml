@@ -23,7 +23,7 @@ build_script:
   - cd c:\projects\manif
   - md build
   - cd build
-  - cmake -G "Visual Studio 14 2015 Win64" -D EIGEN3_INCLUDE_DIR=C:\projects\eigen-eigen-ce5a455b34c0 -DBUILD_TESTING=ON -DBUILD_EXAMPLES=ON ..
+  - cmake -D EIGEN3_INCLUDE_DIR=C:\projects\eigen-eigen-ce5a455b34c0 -DBUILD_TESTING=ON -DBUILD_EXAMPLES=ON ..
   - cmake --build .
 
 after_build:

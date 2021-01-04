@@ -36,7 +36,7 @@ struct traits<SE3<_Scalar>>
   using Transformation = Eigen::Matrix<Scalar, 4, 4>;
   using Rotation       = Eigen::Matrix<Scalar, Dim, Dim>;
   using Translation    = Eigen::Matrix<Scalar, Dim, 1>;
-  using Vector         = Eigen::Matrix<Scalar, DoF, 1>;
+  using Vector         = Eigen::Matrix<Scalar, Dim, 1>;
 };
 
 } /* namespace internal */
@@ -44,11 +44,9 @@ struct traits<SE3<_Scalar>>
 
 namespace manif {
 
-////////////////
-///          ///
-/// LieGroup ///
-///          ///
-////////////////
+//
+// LieGroup
+//
 
 /**
  * @brief Represent an element of SE3.
@@ -72,6 +70,8 @@ public:
 
   MANIF_INHERIT_GROUP_API
 
+  using Base::normalize;
+
   SE3()  = default;
   ~SE3() = default;
 
@@ -89,12 +89,29 @@ public:
   SE3(const Eigen::MatrixBase<_EigenDerived>& data);
 
   /**
-   * @brief Constructor given a translation and a quaternion.
+   * @brief Constructor given a translation and a unit quaternion.
    * @param[in] t A translation vector.
-   * @param[in] q A quaternion.
+   * @param[in] q A unit quaternion.
+   * @throws manif::invalid_argument on un-normalized complex number.
    */
   SE3(const Translation& t,
       const Eigen::Quaternion<Scalar>& q);
+
+  /**
+   * @brief Constructor given a translation and an angle axis.
+   * @param[in] t A translation vector.
+   * @param[in] angle_axis An angle-axis.
+   */
+  SE3(const Translation& t,
+      const Eigen::AngleAxis<Scalar>& angle_axis);
+
+  /**
+   * @brief Constructor given a translation and SO3 element.
+   * @param[in] t A translation vector.
+   * @param[in] SO3 An element of SO3.
+   */
+  SE3(const Translation& t,
+      const SO3<Scalar>& SO3);
 
   /**
    * @brief Constructor given translation components and
@@ -110,12 +127,13 @@ public:
       const Scalar roll, const Scalar pitch, const Scalar yaw);
 
   /**
-   * @brief Constructor given a translation and SO3 element.
-   * @param[in] t A translation vector.
-   * @param[in] SO3 An element of SO3.
+   * @brief Constructor from a 3D Eigen::Isometry<Scalar>
+   * @param[in] h an isometry object from Eigen
+   *
+   * Isometry is a typedef from Eigen::Transform, in which the linear part is assumed a rotation matrix.
+   * This is used to speed up certain methods of Transform, especially inverse().
    */
-  SE3(const Translation& t,
-      const SO3<Scalar>& SO3);
+  SE3(const Eigen::Transform<_Scalar,3,Eigen::Isometry>& h);
 
   // LieGroup common API
 
@@ -125,7 +143,7 @@ public:
 
 protected:
 
-  friend class LieGroupBase<SE3<Scalar>>;
+  friend struct LieGroupBase<SE3<Scalar>>;
   DataType& coeffs_nonconst();
 
   DataType data_;
@@ -134,8 +152,20 @@ protected:
 MANIF_EXTRA_GROUP_TYPEDEF(SE3)
 
 template <typename _Scalar>
+template <typename _EigenDerived>
+SE3<_Scalar>::SE3(const Eigen::MatrixBase<_EigenDerived>& data)
+  : data_(data)
+{
+  using std::abs;
+  MANIF_CHECK(abs(data_.template tail<4>().norm()-Scalar(1)) <
+              Constants<Scalar>::eps_s,
+              "SE3 constructor argument not normalized !",
+              invalid_argument);
+}
+
+template <typename _Scalar>
 SE3<_Scalar>::SE3(const Base& o)
-  : data_(o.coeffs())
+  : SE3(o.coeffs())
 {
   //
 }
@@ -144,7 +174,7 @@ template <typename _Scalar>
 template <typename _DerivedOther>
 SE3<_Scalar>::SE3(
     const SE3Base<_DerivedOther>& o)
-  : data_(o.coeffs())
+  : SE3(o.coeffs())
 {
   //
 }
@@ -153,15 +183,7 @@ template <typename _Scalar>
 template <typename _DerivedOther>
 SE3<_Scalar>::SE3(
     const LieGroupBase<_DerivedOther>& o)
-  : data_(o.coeffs())
-{
-  //
-}
-
-template <typename _Scalar>
-template <typename _EigenDerived>
-SE3<_Scalar>::SE3(const Eigen::MatrixBase<_EigenDerived>& data)
-  : data_(data)
+  : SE3(o.coeffs())
 {
   //
 }
@@ -170,6 +192,14 @@ template <typename _Scalar>
 SE3<_Scalar>::SE3(const Translation& t,
                   const Eigen::Quaternion<Scalar>& q)
   : SE3((DataType() << t, q.coeffs() ).finished())
+{
+  //
+}
+
+template <typename _Scalar>
+SE3<_Scalar>::SE3(const Translation& t,
+                  const Eigen::AngleAxis<Scalar>& a)
+  : SE3(t, Quaternion(a))
 {
   //
 }
@@ -192,6 +222,14 @@ SE3<_Scalar>::SE3(const Translation& t,
 {
   //
 }
+
+template <typename _Scalar>
+SE3<_Scalar>::SE3(const Eigen::Transform<_Scalar,3,Eigen::Isometry>& h)
+  : SE3(h.translation(), Eigen::Quaternion<_Scalar>(h.rotation()))
+{
+  //
+}
+
 
 template <typename _Scalar>
 typename SE3<_Scalar>::DataType&

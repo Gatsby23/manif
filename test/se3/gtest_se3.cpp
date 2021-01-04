@@ -35,6 +35,38 @@ TEST(TEST_SE3, TEST_SE3_CONSTRUCTOR_T_Q)
   EXPECT_DOUBLE_EQ(1, se3.coeffs()(6));
 }
 
+TEST(TEST_SE3, TEST_SE3_CONSTRUCTOR_T_AA)
+{
+  SE3d se3(SE3d::Translation(1,2,3),
+           Eigen::AngleAxis<double>(Eigen::Quaterniond::Identity()));
+
+  EXPECT_DOUBLE_EQ(1, se3.coeffs()(0));
+  EXPECT_DOUBLE_EQ(2, se3.coeffs()(1));
+  EXPECT_DOUBLE_EQ(3, se3.coeffs()(2));
+  EXPECT_DOUBLE_EQ(0, se3.coeffs()(3));
+  EXPECT_DOUBLE_EQ(0, se3.coeffs()(4));
+  EXPECT_DOUBLE_EQ(0, se3.coeffs()(5));
+  EXPECT_DOUBLE_EQ(1, se3.coeffs()(6));
+}
+
+TEST(TEST_SE3, TEST_SE3_CONSTRUCTOR_ISOMETRY)
+{
+  Eigen::Isometry3d h = Eigen::Translation3d(1,2,3) * Eigen::Quaterniond::Identity();
+
+  SE3d se3(h);
+
+  EXPECT_DOUBLE_EQ(1, se3.coeffs()(0));
+  EXPECT_DOUBLE_EQ(2, se3.coeffs()(1));
+  EXPECT_DOUBLE_EQ(3, se3.coeffs()(2));
+  EXPECT_DOUBLE_EQ(0, se3.coeffs()(3));
+  EXPECT_DOUBLE_EQ(0, se3.coeffs()(4));
+  EXPECT_DOUBLE_EQ(0, se3.coeffs()(5));
+  EXPECT_DOUBLE_EQ(1, se3.coeffs()(6));
+
+  EXPECT_EIGEN_NEAR(h.matrix(), se3.transform());
+  EXPECT_EIGEN_NEAR(h.matrix(), se3.isometry().matrix());
+}
+
 TEST(TEST_SE3, TEST_SE3_CONSTRUCTOR_COPY)
 {
   SE3d::DataType values; values << 0,0,0, 0,0,0,1;
@@ -48,6 +80,27 @@ TEST(TEST_SE3, TEST_SE3_CONSTRUCTOR_COPY)
   EXPECT_DOUBLE_EQ(0, se3.coeffs()(4));
   EXPECT_DOUBLE_EQ(0, se3.coeffs()(5));
   EXPECT_DOUBLE_EQ(1, se3.coeffs()(6));
+}
+
+TEST(TEST_SE3, TEST_SE3_CONSTRUCTOR_NOT_NORMALIZED_ARGS)
+{
+  // EXPECT_THROW(
+  //   SE3d se3(SE3d(1, 1)),
+  //   manif::invalid_argument
+  // );
+
+  SE3d::DataType values; values << 0,0,0, 1,1,1,1;
+
+  EXPECT_THROW(
+    SE3d se3(values),
+    manif::invalid_argument
+  );
+
+  try {
+    SE3d se3(values);
+  } catch (manif::invalid_argument& e) {
+    EXPECT_FALSE(std::string(e.what()).empty());
+  }
 }
 
 TEST(TEST_SE3, TEST_SE3_DATA)
@@ -239,7 +292,7 @@ TEST(TEST_SE3, TEST_SE3_ACT)
   EXPECT_NEAR(+1, transformed_point.y(), 1e-15);
   EXPECT_NEAR(+1, transformed_point.z(), 1e-15);
 
-  se3 = SE3d(1,1,1,M_PI,M_PI_2,M_PI/4.);
+  se3 = SE3d(1,1,1,MANIF_PI,MANIF_PI_2,MANIF_PI/4.);
 
   transformed_point = se3.act(Eigen::Vector3d(1,1,1));
 
@@ -247,7 +300,7 @@ TEST(TEST_SE3, TEST_SE3_ACT)
   EXPECT_NEAR(-0.414213562373, transformed_point.y(), 1e-12);
   EXPECT_NEAR( 0, transformed_point.z(), 1e-15);
 
-  se3 = SE3d(-1,-1,-1,M_PI/4,-M_PI_2,-M_PI);
+  se3 = SE3d(-1,-1,-1,MANIF_PI/4,-MANIF_PI_2,-MANIF_PI);
 
   transformed_point = se3.act(Eigen::Vector3d(1,1,1));
 
@@ -255,6 +308,52 @@ TEST(TEST_SE3, TEST_SE3_ACT)
   EXPECT_NEAR(-1, transformed_point.y(), 1e-15);
   EXPECT_NEAR( 0, transformed_point.z(), 1e-15);
 }
+
+TEST(TEST_SE3, TEST_SE3_TRANSFORM)
+{
+  Eigen::Isometry3d h = Eigen::Translation3d(1,2,3) * Eigen::Quaterniond::Identity();
+
+  SE3d se3(h);
+
+  Eigen::Matrix4d se3h = se3.transform();
+
+  EXPECT_DOUBLE_EQ(1, se3h(0,0));
+  EXPECT_DOUBLE_EQ(0, se3h(0,1));
+  EXPECT_DOUBLE_EQ(0, se3h(0,2));
+  EXPECT_DOUBLE_EQ(1, se3h(0,3));
+  EXPECT_DOUBLE_EQ(0, se3h(1,0));
+  EXPECT_DOUBLE_EQ(1, se3h(1,1));
+  EXPECT_DOUBLE_EQ(0, se3h(1,2));
+  EXPECT_DOUBLE_EQ(2, se3h(1,3));
+  EXPECT_DOUBLE_EQ(0, se3h(2,0));
+  EXPECT_DOUBLE_EQ(0, se3h(2,1));
+  EXPECT_DOUBLE_EQ(1, se3h(2,2));
+  EXPECT_DOUBLE_EQ(3, se3h(2,3));
+}
+
+TEST(TEST_SE3, TEST_SE3_ISOMETRY)
+{
+  Eigen::Isometry3d h = Eigen::Translation3d(1,2,3) * Eigen::Quaterniond::Identity();
+
+  SE3d se3(h);
+
+  Eigen::Isometry3d se3h = se3.isometry();
+
+  EXPECT_DOUBLE_EQ(1, se3h.matrix()(0,0));
+  EXPECT_DOUBLE_EQ(0, se3h.matrix()(0,1));
+  EXPECT_DOUBLE_EQ(0, se3h.matrix()(0,2));
+  EXPECT_DOUBLE_EQ(1, se3h.matrix()(0,3));
+  EXPECT_DOUBLE_EQ(0, se3h.matrix()(1,0));
+  EXPECT_DOUBLE_EQ(1, se3h.matrix()(1,1));
+  EXPECT_DOUBLE_EQ(0, se3h.matrix()(1,2));
+  EXPECT_DOUBLE_EQ(2, se3h.matrix()(1,3));
+  EXPECT_DOUBLE_EQ(0, se3h.matrix()(2,0));
+  EXPECT_DOUBLE_EQ(0, se3h.matrix()(2,1));
+  EXPECT_DOUBLE_EQ(1, se3h.matrix()(2,2));
+  EXPECT_DOUBLE_EQ(3, se3h.matrix()(2,3));
+}
+
+
 
 MANIF_TEST(SE3d);
 

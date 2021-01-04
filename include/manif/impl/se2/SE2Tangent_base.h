@@ -6,11 +6,9 @@
 
 namespace manif {
 
-///////////////
-///         ///
-/// Tangent ///
-///         ///
-///////////////
+//
+// Tangent
+//
 
 /**
  * @brief The base class of the SE2 tangent.
@@ -52,6 +50,14 @@ public:
    * @note This is the exp() map with the argument in vector form.
    * @note See Eqs. (156,158) & Eq. (163).
    */
+  LieGroup exp(OptJacobianRef J_m_t = {}) const;
+
+  /**
+   * @brief This function is deprecated.
+   * Please considere using
+   * @ref exp instead.
+   */
+  MANIF_DEPRECATED
   LieGroup retract(OptJacobianRef J_m_t = {}) const;
 
   /**
@@ -94,7 +100,7 @@ SE2TangentBase<_Derived>::hat() const
 
 template <typename _Derived>
 typename SE2TangentBase<_Derived>::LieGroup
-SE2TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
+SE2TangentBase<_Derived>::exp(OptJacobianRef J_m_t) const
 {
   using std::abs;
   using std::cos;
@@ -148,6 +154,13 @@ SE2TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
 }
 
 template <typename _Derived>
+typename SE2TangentBase<_Derived>::LieGroup
+SE2TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
+{
+  return exp(J_m_t);
+}
+
+template <typename _Derived>
 typename SE2TangentBase<_Derived>::Jacobian
 SE2TangentBase<_Derived>::rjac() const
 {
@@ -184,7 +197,7 @@ SE2TangentBase<_Derived>::rjac() const
 //  return Jr;
 
   Jacobian Jr;
-  retract(Jr);
+  exp(Jr);
 
   return Jr;
 }
@@ -248,7 +261,7 @@ SE2TangentBase<_Derived>::smallAdj() const
   return smallAdj;
 }
 
-/// SE2Tangent specific API
+// SE2Tangent specific API
 
 template <typename _Derived>
 typename SE2TangentBase<_Derived>::Scalar
@@ -273,15 +286,13 @@ SE2TangentBase<_Derived>::angle() const
 
 namespace internal {
 
+//! @brief Generator specialization for SE2TangentBase objects.
 template <typename Derived>
 struct GeneratorEvaluator<SE2TangentBase<Derived>>
 {
   static typename SE2TangentBase<Derived>::LieAlg
   run(const int i)
   {
-    MANIF_CHECK(i>=0 && i<SE2TangentBase<Derived>::DoF,
-                "Index i must be in [0,2]!");
-
     using LieAlg = typename SE2TangentBase<Derived>::LieAlg;
     using Scalar = typename SE2TangentBase<Derived>::Scalar;
 
@@ -312,7 +323,7 @@ struct GeneratorEvaluator<SE2TangentBase<Derived>>
         return E2;
       }
       default:
-        MANIF_THROW("Index i must be in [0,2]!");
+        MANIF_THROW("Index i must be in [0,2]!", invalid_argument);
         break;
     }
 
@@ -320,6 +331,7 @@ struct GeneratorEvaluator<SE2TangentBase<Derived>>
   }
 };
 
+//! @brief Inner weight matrix specialization for SE2TangentBase objects.
 template <typename Derived>
 struct WEvaluator<SE2TangentBase<Derived>>
 {
@@ -335,6 +347,17 @@ struct WEvaluator<SE2TangentBase<Derived>>
                            Scalar(0), Scalar(0), Scalar(2) ).finished());
 
     return W;
+  }
+};
+
+//! @brief Random specialization for SE2TangentBase objects.
+template <typename Derived>
+struct RandomEvaluatorImpl<SE2TangentBase<Derived>>
+{
+  static void run(SE2TangentBase<Derived>& m)
+  {
+    m.coeffs().setRandom();         // in [-1,1]
+    m.coeffs().coeffRef(2) *= MANIF_PI; // in [-PI,PI]
   }
 };
 

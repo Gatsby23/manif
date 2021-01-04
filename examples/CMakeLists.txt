@@ -4,9 +4,11 @@ add_executable(se2_average se2_average.cpp)
 add_executable(se2_interpolation se2_interpolation.cpp)
 add_executable(se2_decasteljau se2_DeCasteljau.cpp)
 add_executable(se2_localization se2_localization.cpp)
+add_executable(se2_sam se2_sam.cpp)
 
 add_executable(se3_localization se3_localization.cpp)
 add_executable(se3_sam se3_sam.cpp)
+add_executable(se3_sam_selfcalib se3_sam_selfcalib.cpp)
 
 set(CXX_11_EXAMPLE_TARGETS
 
@@ -18,10 +20,12 @@ set(CXX_11_EXAMPLE_TARGETS
   se2_decasteljau
   se2_average
   se2_localization
+  se2_sam
 
   # SE3
   se3_localization
   se3_sam
+  se3_sam_selfcalib
 )
 
 # Link to manif

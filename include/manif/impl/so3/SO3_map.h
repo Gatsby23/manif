@@ -12,8 +12,9 @@ struct traits< Eigen::Map<SO3<_Scalar>,0> >
     : public traits<SO3<_Scalar>>
 {
   using typename traits<SO3<_Scalar>>::Scalar;
-  using traits<SO3<_Scalar>>::RepSize;
-  using DataType = ::Eigen::Map<Eigen::Matrix<Scalar, RepSize, 1>, 0>;
+  using traits<SO3<Scalar>>::RepSize;
+  using Base = SO3Base<Eigen::Map<SO3<Scalar>, 0>>;
+  using DataType = Eigen::Map<Eigen::Matrix<Scalar, RepSize, 1>, 0>;
 };
 
 //! @brief traits specialization for Eigen Map const
@@ -22,8 +23,9 @@ struct traits< Eigen::Map<const SO3<_Scalar>,0> >
     : public traits<const SO3<_Scalar>>
 {
   using typename traits<const SO3<_Scalar>>::Scalar;
-  using traits<const SO3<_Scalar>>::RepSize;
-  using DataType = ::Eigen::Map<const Eigen::Matrix<Scalar, RepSize, 1>, 0>;
+  using traits<const SO3<Scalar>>::RepSize;
+  using Base = SO3Base<Eigen::Map<const SO3<Scalar>, 0>>;
+  using DataType = Eigen::Map<const Eigen::Matrix<Scalar, RepSize, 1>, 0>;
 };
 
 } /* namespace internal */
@@ -51,7 +53,7 @@ public:
 
 protected:
 
-  friend class manif::LieGroupBase<Map<manif::SO3<_Scalar>, 0>>;
+  friend struct manif::LieGroupBase<Map<manif::SO3<_Scalar>, 0>>;
   DataType& coeffs_nonconst() { return data_; }
 
   DataType data_;

@@ -6,11 +6,9 @@
 
 namespace manif {
 
-////////////////
-///          ///
-/// LieGroup ///
-///          ///
-////////////////
+//
+// LieGroup
+//
 
 /**
  * @brief The base class of the SO2 group.
@@ -53,6 +51,14 @@ public:
    * @note See Eq. (115) & Eqs. (79,126).
    * @see SO2Tangent.
    */
+  Tangent log(OptJacobianRef J_t_m = {}) const;
+
+  /**
+   * @brief This function is deprecated.
+   * Please considere using
+   * @ref log instead.
+   */
+  MANIF_DEPRECATED
   Tangent lift(OptJacobianRef J_t_m = {}) const;
 
   /**
@@ -118,6 +124,11 @@ public:
    */
   Scalar angle() const;
 
+  /**
+   * @brief Normalize the underlying complex number.
+   */
+  void normalize();
+
 protected:
 
   using Base::coeffs_nonconst;
@@ -162,12 +173,19 @@ SO2Base<_Derived>::inverse(OptJacobianRef J_minv_m) const
 
 template <typename _Derived>
 typename SO2Base<_Derived>::Tangent
-SO2Base<_Derived>::lift(OptJacobianRef J_t_m) const
+SO2Base<_Derived>::log(OptJacobianRef J_t_m) const
 {
   if (J_t_m)
     J_t_m->setConstant(Scalar(1));
 
   return Tangent(angle());
+}
+
+template <typename _Derived>
+typename SO2Base<_Derived>::Tangent
+SO2Base<_Derived>::lift(OptJacobianRef J_t_m) const
+{
+  return log(J_t_m);
 }
 
 template <typename _Derived>
@@ -178,16 +196,11 @@ SO2Base<_Derived>::compose(
     OptJacobianRef J_mc_ma,
     OptJacobianRef J_mc_mb) const
 {
+  using std::abs;
+
   static_assert(
     std::is_base_of<SO2Base<_DerivedOther>, _DerivedOther>::value,
     "Argument does not inherit from SE2Base !");
-
-  const auto& m_so2 = static_cast<const SO2Base<_DerivedOther>&>(m);
-
-  const Scalar lhs_real = real();
-  const Scalar lhs_imag = imag();
-  const Scalar rhs_real = m_so2.real();
-  const Scalar rhs_imag = m_so2.imag();
 
   if (J_mc_ma)
     J_mc_ma->setConstant(Scalar(1));
@@ -195,10 +208,21 @@ SO2Base<_Derived>::compose(
   if (J_mc_mb)
     J_mc_mb->setConstant(Scalar(1));
 
-  return LieGroup(
-        lhs_real * rhs_real - lhs_imag * rhs_imag,
-        lhs_real * rhs_imag + lhs_imag * rhs_real
-        );
+  const auto& m_so2 = static_cast<const SO2Base<_DerivedOther>&>(m);
+
+  Scalar ret_real = real() * m_so2.real() - imag() * m_so2.imag();
+  Scalar ret_imag = real() * m_so2.imag() + imag() * m_so2.real();
+
+  const Scalar ret_sqnorm = ret_real*ret_real+ret_imag*ret_imag;
+
+  if (abs(ret_sqnorm-Scalar(1)) > Constants<Scalar>::eps_s)
+  {
+    const Scalar scale = approxSqrtInv(ret_sqnorm);
+    ret_real *= scale;
+    ret_imag *= scale;
+  }
+
+  return LieGroup(ret_real, ret_imag);
 }
 
 template <typename _Derived>
@@ -232,7 +256,7 @@ SO2Base<_Derived>::adj() const
   return adj;
 }
 
-/// SO2 specific function
+// SO2 specific function
 
 template <typename _Derived>
 /*const*/ typename SO2Base<_Derived>::Scalar/*&*/
@@ -270,6 +294,27 @@ SO2Base<_Derived>::angle() const
 //  return coeffs.y();
 //}
 
+template <typename _Derived>
+void SO2Base<_Derived>::normalize()
+{
+  coeffs_nonconst().normalize();
+}
+
+namespace internal {
+
+//! @brief Random specialization for SO2Base objects.
+template <typename Derived>
+struct RandomEvaluatorImpl<SO2Base<Derived>>
+{
+  template <typename T>
+  static void run(T& m)
+  {
+    using Tangent = typename LieGroupBase<Derived>::Tangent;
+    m = Tangent::Random().exp();
+  }
+};
+
+} /* namespace internal */
 } /* namespace manif */
 
 #endif /* _MANIF_MANIF_SO2_BASE_H_ */

@@ -6,11 +6,9 @@
 
 namespace manif {
 
-///////////////
-///         ///
-/// Tangent ///
-///         ///
-///////////////
+//
+// Tangent
+//
 
 /**
  * @brief The base class of the SO2 tangent.
@@ -53,6 +51,14 @@ public:
    * @note This is the exp() map with the argument in vector form.
    * @note See Eqs. (114, 116) and Eq. (126).
    */
+  LieGroup exp(OptJacobianRef J_m_t = {}) const;
+
+  /**
+   * @brief This function is deprecated.
+   * Please considere using
+   * @ref exp instead.
+   */
+  MANIF_DEPRECATED
   LieGroup retract(OptJacobianRef J_m_t = {}) const;
 
   /**
@@ -97,7 +103,7 @@ public:
 
 template <typename _Derived>
 typename SO2TangentBase<_Derived>::LieGroup
-SO2TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
+SO2TangentBase<_Derived>::exp(OptJacobianRef J_m_t) const
 {
   using std::cos;
   using std::sin;
@@ -108,6 +114,13 @@ SO2TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
   }
 
   return LieGroup(cos(coeffs()(0)), sin(coeffs()(0)));
+}
+
+template <typename _Derived>
+typename SO2TangentBase<_Derived>::LieGroup
+SO2TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
+{
+  return exp(J_m_t);
 }
 
 template <typename _Derived>
@@ -153,7 +166,7 @@ template <typename _Derived>
 typename SO2TangentBase<_Derived>::Jacobian
 SO2TangentBase<_Derived>::smallAdj() const
 {
-  static const Jacobian smallAdj = Jacobian::Constant(Scalar(1));
+  static const Jacobian smallAdj = Jacobian::Zero();
   return smallAdj;
 }
 
@@ -176,6 +189,7 @@ SO2TangentBase<_Derived>::angle() const
 namespace internal {
 
 /**
+ * @brief Generator specialization for SO2TangentBase objects.
  * E = | 0 -1 |
  *     | 1  0 |
  */
@@ -186,12 +200,24 @@ struct GeneratorEvaluator<SO2TangentBase<Derived>>
   run(const int i)
   {
     MANIF_CHECK(i==0 && i<SO2TangentBase<Derived>::DoF,
-                "Index i must be 0!");
+                "Index i must be 0!",
+                invalid_argument);
 
     const static typename SO2TangentBase<Derived>::LieAlg E0 =
         skew(typename SO2TangentBase<Derived>::Scalar(1));
 
     return E0;
+  }
+};
+
+//! @brief Random specialization for SO2TangentBase objects.
+template <typename Derived>
+struct RandomEvaluatorImpl<SO2TangentBase<Derived>>
+{
+  static void run(SO2TangentBase<Derived>& m)
+  {
+    // in [-1,1]  /  in [-PI,PI]
+    m.coeffs().setRandom() *= MANIF_PI;
   }
 };
 

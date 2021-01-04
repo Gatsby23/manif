@@ -7,11 +7,9 @@
 
 namespace manif {
 
-///////////////
-///         ///
-/// Tangent ///
-///         ///
-///////////////
+//
+// Tangent
+//
 
 /**
  * @brief The base class of the SE3 tangent.
@@ -58,6 +56,14 @@ public:
    * @note This is the exp() map with the argument in vector form.
    * @note See Eq. (172) & Eqs. (179,180).
    */
+  LieGroup exp(OptJacobianRef J_m_t = {}) const;
+
+  /**
+   * @brief This function is deprecated.
+   * Please considere using
+   * @ref exp instead.
+   */
+  MANIF_DEPRECATED
   LieGroup retract(OptJacobianRef J_m_t = {}) const;
 
   /**
@@ -71,6 +77,18 @@ public:
    * @note See Eqs. (179,180).
    */
   Jacobian ljac() const;
+
+  /**
+   * @brief Get the inverse right Jacobian of SE3.
+   * @note See note after Eqs. (179,180).
+   */
+  Jacobian rjacinv() const;
+
+  /**
+   * @brief Get the inverse left Jacobian of SE3.
+   * @note See Eqs. (179,180).
+   */
+  Jacobian ljacinv() const;
 
   /**
    * @brief
@@ -96,7 +114,7 @@ public:
   //Scalar pitch() const;
   //Scalar yaw() const;
 
-//protected:
+public: /// @todo make protected
 
   const Eigen::Map<const SO3Tangent<Scalar>> asSO3() const
   {
@@ -107,11 +125,17 @@ public:
   {
     return Eigen::Map<SO3Tangent<Scalar>>(coeffs.data()+3);
   }
+
+private:
+
+  template <typename _EigenDerived>
+  static void fillQ(Eigen::Ref<Eigen::Matrix<Scalar, 3, 3>> Q,
+                    const Eigen::MatrixBase<_EigenDerived>& c);
 };
 
 template <typename _Derived>
 typename SE3TangentBase<_Derived>::LieGroup
-SE3TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
+SE3TangentBase<_Derived>::exp(OptJacobianRef J_m_t) const
 {
   using std::sqrt;
   using std::cos;
@@ -123,7 +147,14 @@ SE3TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
   }
 
   /// @note Eq. 10.93
-  return LieGroup(asSO3().ljac()*v(), asSO3().retract().quat());
+  return LieGroup(asSO3().ljac()*v(), asSO3().exp().quat());
+}
+
+template <typename _Derived>
+typename SE3TangentBase<_Derived>::LieGroup
+SE3TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
+{
+  return exp(J_m_t);
 }
 
 template <typename _Derived>
@@ -144,51 +175,12 @@ template <typename _Derived>
 typename SE3TangentBase<_Derived>::Jacobian
 SE3TangentBase<_Derived>::rjac() const
 {
-  using std::cos;
-  using std::sin;
-  using std::sqrt;
-
   /// @note Eq. 10.95
-  Jacobian Jr = Jacobian::Zero();
+  Jacobian Jr;
+  Jr.template bottomLeftCorner<3,3>().setZero();
   Jr.template topLeftCorner<3,3>() = asSO3().rjac();
-  Jr.template bottomRightCorner<3,3>() =
-      Jr.template topLeftCorner<3,3>();
-
-  const Scalar theta_sq = asSO3().coeffs().squaredNorm();
-  const Eigen::Matrix<Scalar, 3, 3> V = skew(v());
-  const Eigen::Matrix<Scalar, 3, 3> W = asSO3().hat();
-
-  Scalar A(0.5), B, C, D;
-
-  // Small angle approximation
-  if (theta_sq <= Constants<Scalar>::eps_s)
-  {
-    B =  Scalar(1./6.)  + Scalar(1./120.)  * theta_sq;
-    C = -Scalar(1./24.) + Scalar(1./720.)  * theta_sq;
-    D = -Scalar(1./60.);
-  }
-  else
-  {
-   const Scalar theta     = sqrt(theta_sq);
-   const Scalar sin_theta = sin(theta);
-   const Scalar cos_theta = cos(theta);
-
-    B = (theta - sin_theta) / (theta_sq*theta);
-    C = (Scalar(1) - theta_sq/Scalar(2) - cos_theta) / (theta_sq*theta_sq);
-    D = (C - Scalar(3)*(theta-sin_theta-theta_sq*theta/Scalar(6)) / (theta_sq*theta_sq*theta));
-
-    // http://asrl.utias.utoronto.ca/~tdb/bib/barfoot_ser17_identities.pdf
-//    C = (theta_sq+Scalar(2)*cos_theta-Scalar(2)) / (Scalar(2)*theta_sq*theta_sq);
-//    D = (Scalar(2)*theta - Scalar(3)*sin_theta + theta*cos_theta) / (Scalar(2)*theta_sq*theta_sq*theta);
-  }
-
-  /// @note Barfoot14tro Eq. 102
-  /// invert sign of odd blocks to obtain Jr
-  Jr.template topRightCorner<3,3>().noalias() =
-      - A * V
-      + B * (W*V + V*W - (W*V)*W)
-      + C * ((W*W)*V + (V*W)*W - Scalar(3)*(W*V)*W)
-      - D * Scalar(0.5) * (((W*V)*W)*W + ((W*W)*V)*W);
+  Jr.template bottomRightCorner<3,3>() = Jr.template topLeftCorner<3,3>();
+  fillQ( Jr.template topRightCorner<3,3>(), -coeffs() );
 
   return Jr;
 }
@@ -197,70 +189,130 @@ template <typename _Derived>
 typename SE3TangentBase<_Derived>::Jacobian
 SE3TangentBase<_Derived>::ljac() const
 {
-  using std::cos;
-  using std::sin;
-  using std::sqrt;
-
   /// @note Eq. 10.95
-  Jacobian Jl = Jacobian::Zero();
+  Jacobian Jl;
+  Jl.template bottomLeftCorner<3,3>().setZero();
   Jl.template topLeftCorner<3,3>() = asSO3().ljac();
-  Jl.template bottomRightCorner<3,3>() =
-      Jl.template topLeftCorner<3,3>();
-
-  const Scalar theta_sq = asSO3().coeffs().squaredNorm();
-  const Eigen::Matrix<Scalar, 3, 3> V = skew(v());
-  const Eigen::Matrix<Scalar, 3, 3> W = asSO3().hat();
-
-  Scalar A(0.5), B, C, D;
-
-  // Small angle approximation
-  if (theta_sq <= Constants<Scalar>::eps_s)
-  {
-    B =  Scalar(1./6.)  + Scalar(1./120.)  * theta_sq;
-    C = -Scalar(1./24.) + Scalar(1./720.)  * theta_sq;
-    D = -Scalar(1./60.);
-  }
-  else
-  {
-    const Scalar theta     = sqrt(theta_sq);
-    const Scalar sin_theta = sin(theta);
-    const Scalar cos_theta = cos(theta);
-
-    B = (theta - sin_theta) / (theta_sq*theta);
-    C = (Scalar(1) - theta_sq/Scalar(2) - cos_theta) / (theta_sq*theta_sq);
-    D = (C - Scalar(3)*(theta-sin_theta-theta_sq*theta/Scalar(6)) / (theta_sq*theta_sq*theta));
-
-    // http://asrl.utias.utoronto.ca/~tdb/bib/barfoot_ser17_identities.pdf
-//    C = (theta_sq+Scalar(2)*cos_theta-Scalar(2)) / (Scalar(2)*theta_sq*theta_sq);
-//    D = (Scalar(2)*theta - Scalar(3)*sin_theta + theta*cos_theta) / (Scalar(2)*theta_sq*theta_sq*theta);
-  }
-
-  /// @note Barfoot14tro Eq. 102
-  Jl.template topRightCorner<3,3>().noalias() =
-      + A * V
-      + B * (W*V + V*W + (W*V)*W)
-      - C * ((W*W)*V + (V*W)*W - ((Scalar(3)*W)*V)*W)
-      - D * Scalar(0.5) * (((W*V)*W)*W + ((W*W)*V)*W);
+  Jl.template bottomRightCorner<3,3>() = Jl.template topLeftCorner<3,3>();
+  fillQ( Jl.template topRightCorner<3,3>(), coeffs() );
 
   return Jl;
 }
+
+/// @note barfoot14tro Eq. 102
+template <typename _Derived>
+typename SE3TangentBase<_Derived>::Jacobian
+SE3TangentBase<_Derived>::rjacinv() const
+{
+  /// @note Eq. 10.95
+  Jacobian Jr_inv;
+  fillQ( Jr_inv.template bottomLeftCorner<3,3>(), -coeffs() ); // serves as temporary Q
+  Jr_inv.template topLeftCorner<3,3>() = asSO3().rjacinv();
+  Jr_inv.template bottomRightCorner<3,3>() = Jr_inv.template topLeftCorner<3,3>();
+  Jr_inv.template topRightCorner<3,3>().noalias() =
+      -Jr_inv.template topLeftCorner<3,3>()    *
+       Jr_inv.template bottomLeftCorner<3,3>() *
+       Jr_inv.template topLeftCorner<3,3>();
+  Jr_inv.template bottomLeftCorner<3,3>().setZero();
+
+  return Jr_inv;
+}
+
+template <typename _Derived>
+typename SE3TangentBase<_Derived>::Jacobian
+SE3TangentBase<_Derived>::ljacinv() const
+{
+  Jacobian Jl_inv;
+  fillQ( Jl_inv.template bottomLeftCorner<3,3>(), coeffs() ); // serves as temporary Q
+  Jl_inv.template topLeftCorner<3,3>() = asSO3().ljacinv();
+  Jl_inv.template bottomRightCorner<3,3>() = Jl_inv.template topLeftCorner<3,3>();
+  Jl_inv.template topRightCorner<3,3>().noalias() =
+      -Jl_inv.template topLeftCorner<3,3>()    *
+       Jl_inv.template bottomLeftCorner<3,3>() *
+       Jl_inv.template topLeftCorner<3,3>();
+  Jl_inv.template bottomLeftCorner<3,3>().setZero();
+
+  return Jl_inv;
+}
+
+template <typename _Derived>
+template <typename _EigenDerived>
+void SE3TangentBase<_Derived>::fillQ(
+  Eigen::Ref<Eigen::Matrix<Scalar, 3, 3>> Q,
+  const Eigen::MatrixBase<_EigenDerived>& c)
+{
+    using std::cos;
+    using std::sin;
+    using std::sqrt;
+
+    const Scalar theta_sq = c.template tail<3>().squaredNorm();
+
+    Scalar A(0.5), B, C, D;
+
+    // Small angle approximation
+    if (theta_sq <= Constants<Scalar>::eps_s)
+    {
+      B =  Scalar(1./6.)  + Scalar(1./120.)  * theta_sq;
+      C = -Scalar(1./24.) + Scalar(1./720.)  * theta_sq;
+      D = -Scalar(1./60.);
+    }
+    else
+    {
+      const Scalar theta     = sqrt(theta_sq);
+      const Scalar sin_theta = sin(theta);
+      const Scalar cos_theta = cos(theta);
+
+      B = (theta - sin_theta) / (theta_sq*theta);
+      C = (Scalar(1) - theta_sq/Scalar(2) - cos_theta) / (theta_sq*theta_sq);
+      D = (C - Scalar(3)*(theta-sin_theta-theta_sq*theta/Scalar(6)) / (theta_sq*theta_sq*theta));
+
+      // http://asrl.utias.utoronto.ca/~tdb/bib/barfoot_ser17_identities.pdf
+  //    C = (theta_sq+Scalar(2)*cos_theta-Scalar(2)) / (Scalar(2)*theta_sq*theta_sq);
+  //    D = (Scalar(2)*theta - Scalar(3)*sin_theta + theta*cos_theta) / (Scalar(2)*theta_sq*theta_sq*theta);
+    }
+
+    /// @note Barfoot14tro Eq. 102
+    const Eigen::Matrix<Scalar, 3, 3> V   = skew(c.template head<3>());
+    const Eigen::Matrix<Scalar, 3, 3> W   = skew(c.template tail<3>());
+    const Eigen::Matrix<Scalar, 3, 3> VW  = V * W;
+    const Eigen::Matrix<Scalar, 3, 3> WV  = VW.transpose();       // Note on this change wrt. Barfoot: it happens that V*W = (W*V).transpose() !!!
+    const Eigen::Matrix<Scalar, 3, 3> WVW = WV * W;
+    const Eigen::Matrix<Scalar, 3, 3> VWW = VW * W;
+    Q.noalias() =
+        + A * V
+        + B * (WV + VW + WVW)
+        - C * (VWW - VWW.transpose() - Scalar(3) * WVW)           // Note on this change wrt. Barfoot: it happens that V*W*W = -(W*W*V).transpose() !!!
+        - D * WVW * W;                                            // Note on this change wrt. Barfoot: it happens that W*V*W*W = W*W*V*W !!!
+}
+
 
 template <typename _Derived>
 typename SE3TangentBase<_Derived>::Jacobian
 SE3TangentBase<_Derived>::smallAdj() const
 {
-  Jacobian smallAdj = Jacobian::Zero();
-  smallAdj.template topLeftCorner<3,3>() = asSO3().hat();
-  smallAdj.template bottomRightCorner<3,3>() =
-      smallAdj.template topLeftCorner<3,3>();
+  /// @note Chirikjian (close to Eq.10.94)
+  /// says
+  ///       ad(g) = |  Omega  0   |
+  ///               |   V   Omega |
+  ///
+  /// considering vee(log(g)) = (w;v)
+  ///
+  /// but this is
+  ///       ad(g) = |  Omega  V   |
+  ///               |   0   Omega |
+  ///
+  /// considering vee(log(g)) = (v;w)
 
-  smallAdj.template bottomLeftCorner<3,3>() = skew(v());
+  Jacobian smallAdj;
+  smallAdj.template topRightCorner<3,3>() = skew(v());
+  smallAdj.template topLeftCorner<3,3>() = skew(w());
+  smallAdj.template bottomRightCorner<3,3>() = smallAdj.template topLeftCorner<3,3>();
+  smallAdj.template bottomLeftCorner<3,3>().setZero();
 
   return smallAdj;
 }
 
-/// SE3Tangent specific API
-
+// SE3Tangent specific API
 
 template <typename _Derived>
 typename SE3TangentBase<_Derived>::BlockV
@@ -312,15 +364,13 @@ SE3TangentBase<_Derived>::w() const
 
 namespace internal {
 
+//! @brief Generator specialization for SE3TangentBase objects.
 template <typename Derived>
 struct GeneratorEvaluator<SE3TangentBase<Derived>>
 {
   static typename SE3TangentBase<Derived>::LieAlg
   run(const int i)
   {
-    MANIF_CHECK(i>=0 && i<SE3TangentBase<Derived>::DoF,
-                "Index i must be in [0,5]!");
-
     using LieAlg = typename SE3TangentBase<Derived>::LieAlg;
     using Scalar = typename SE3TangentBase<Derived>::Scalar;
 
@@ -381,11 +431,22 @@ struct GeneratorEvaluator<SE3TangentBase<Derived>>
         return E5;
       }
       default:
-        MANIF_THROW("Index i must be in [0,5]!");
+        MANIF_THROW("Index i must be in [0,5]!", invalid_argument);
         break;
     }
 
     return LieAlg{};
+  }
+};
+
+//! @brief Random specialization for SE3TangentBase objects.
+template <typename Derived>
+struct RandomEvaluatorImpl<SE3TangentBase<Derived>>
+{
+  static void run(SE3TangentBase<Derived>& m)
+  {
+    m.coeffs().setRandom();                // in [-1,1]
+    m.coeffs().template tail<3>() *= MANIF_PI; // in [-PI,PI]
   }
 };
 

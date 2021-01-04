@@ -14,7 +14,7 @@ namespace manif {
 
 /**
  * @brief Base class for Lie groups.
- * @class Defines the minimum common API.
+ * Defines the minimum common API.
  * @see TangentBase.
  */
 template <class _Derived>
@@ -59,7 +59,7 @@ public:
   template <class _NewScalar>
   LieGroupTemplate<_NewScalar> cast() const;
 
-  // @todo 'cast' across groups
+  /// @todo 'cast' across groups
   /// SO3 so3 = so2.as<SO3>()
 //  template <class _DerivedOther>
 //  LieGroupTemplate<_DerivedOther> as() const;
@@ -98,6 +98,14 @@ public:
    * @note This is the log() map in vector form.
    * @see Eq. (24).
    */
+  Tangent log(OptJacobianRef J_t_m = {}) const;
+
+  /**
+   * @brief This function is deprecated.
+   * Please considere using
+   * @ref log instead.
+   */
+  MANIF_DEPRECATED
   Tangent lift(OptJacobianRef J_t_m = {}) const;
 
   /**
@@ -224,7 +232,7 @@ public:
    */
   template <typename _DerivedOther>
   bool isApprox(const LieGroupBase<_DerivedOther>& m,
-                const Scalar eps) const;
+                const Scalar eps = Constants<Scalar>::eps) const;
 
   // Some operators
 
@@ -353,7 +361,7 @@ _Derived&
 LieGroupBase<_Derived>::setIdentity()
 {
   const static Tangent zero = Tangent::Zero();
-  derived() = zero.retract();
+  derived() = zero.exp();
   return derived();
 }
 
@@ -361,7 +369,10 @@ template <typename _Derived>
 _Derived&
 LieGroupBase<_Derived>::setRandom()
 {
-  coeffs_nonconst() = Tangent::Random().retract().coeffs();
+  internal::RandomEvaluator<
+      typename internal::traits<_Derived>::Base>(
+        derived()).run();
+
   return derived();
 }
 
@@ -385,7 +396,7 @@ LieGroupBase<_Derived>::rplus(
     (*J_mout_t) = t.rjac();
   }
 
-  return compose(t.retract(), J_mout_m, _);
+  return compose(t.exp(), J_mout_m, _);
 }
 
 template <typename _Derived>
@@ -396,23 +407,17 @@ LieGroupBase<_Derived>::lplus(
     OptJacobianRef J_mout_m,
     OptJacobianRef J_mout_t) const
 {
-  LieGroup mout;
-
   if (J_mout_t)
   {
-    Jacobian J_ret_t;
-    Jacobian J_mout_ret;
-
-    mout = t.retract(J_ret_t).compose(derived(), J_mout_ret, J_mout_m);
-
-    J_mout_t->noalias() = J_mout_ret * J_ret_t;
+    J_mout_t->noalias() = inverse().adj() * t.rjac();
   }
-  else
+
+  if (J_mout_m)
   {
-    mout = t.retract().compose(derived(), _, J_mout_m);
+    J_mout_m->setIdentity();
   }
 
-  return mout;
+  return t.exp().compose(derived());
 }
 
 template <typename _Derived>
@@ -434,7 +439,7 @@ LieGroupBase<_Derived>::rminus(
     OptJacobianRef J_t_ma,
     OptJacobianRef J_t_mb) const
 {
-  const Tangent t = m.inverse().compose(derived()).lift();
+  const Tangent t = m.inverse().compose(derived()).log();
 
   if (J_t_ma)
   {
@@ -456,46 +461,20 @@ LieGroupBase<_Derived>::lminus(
     OptJacobianRef J_t_ma,
     OptJacobianRef J_t_mb) const
 {
-  Tangent t;
+  const Tangent t = compose(m.inverse()).log();
 
-  /// @todo optimize this
-  if (J_t_ma && J_t_mb)
+  if (J_t_ma || J_t_mb)
   {
-    Jacobian J_inv_mb;
-    Jacobian J_comp_inv;
-    Jacobian J_comp_ma;
-    Jacobian J_t_comp;
+    const Jacobian J = t.rjacinv() * m.adj();
 
-    t = compose(m.inverse(J_inv_mb),
-                J_comp_ma, J_comp_inv).lift(J_t_comp);
-
-    J_t_ma->noalias() = J_t_comp * J_comp_ma;
-    J_t_mb->noalias() = J_t_comp * J_comp_inv * J_inv_mb;
-  }
-  else if (J_t_ma && !J_t_mb)
-  {
-    Jacobian J_comp_a;
-    Jacobian J_t_comp;
-
-    t = compose(m.inverse(),
-                J_comp_a, _ ).lift(J_t_comp);
-
-    J_t_ma->noalias() = J_t_comp * J_comp_a;
-  }
-  else if (!J_t_ma && J_t_mb)
-  {
-    Jacobian J_inv_mb;
-    Jacobian J_comp_inv;
-    Jacobian J_t_comp;
-
-    t = compose(m.inverse(J_inv_mb),
-                _, J_comp_inv).lift(J_t_comp);
-
-    J_t_mb->noalias() = J_t_comp * J_comp_inv * J_inv_mb;
-  }
-  else
-  {
-    t = compose(m.inverse()).lift();
+    if (J_t_ma)
+    {
+      (*J_t_ma) =  J;
+    }
+    if (J_t_mb)
+    {
+      (*J_t_mb) = -J;
+    }
   }
 
   return t;
@@ -514,9 +493,16 @@ LieGroupBase<_Derived>::minus(
 
 template <typename _Derived>
 typename LieGroupBase<_Derived>::Tangent
+LieGroupBase<_Derived>::log(OptJacobianRef J_t_m) const
+{
+  return derived().log(J_t_m);
+}
+
+template <typename _Derived>
+typename LieGroupBase<_Derived>::Tangent
 LieGroupBase<_Derived>::lift(OptJacobianRef J_t_m) const
 {
-  return derived().lift(J_t_m);
+  return derived().log(J_t_m);
 }
 
 template <typename _Derived>
@@ -538,19 +524,16 @@ LieGroupBase<_Derived>::between(
     OptJacobianRef J_mc_ma,
     OptJacobianRef J_mc_mb) const
 {
-  LieGroup mc;
+  const LieGroup mc = inverse().compose(m);
 
   if (J_mc_ma)
   {
-    Jacobian J_inv_ma;
-    Jacobian J_mc_inv;
-    mc = inverse(J_inv_ma).compose(m, J_mc_inv, J_mc_mb);
-
-    J_mc_ma->noalias() = J_mc_inv * J_inv_ma;
+    *J_mc_ma = -(mc.inverse().adj());
   }
-  else
+
+  if (J_mc_mb)
   {
-    mc = inverse().compose(m, _, J_mc_mb);
+    J_mc_mb->setIdentity();
   }
 
   return mc;
@@ -580,7 +563,7 @@ LieGroupBase<_Derived>::act(const Vector& v,
   return derived().act(v, J_vout_m, J_vout_v);
 }
 
-/// Operators
+// Operators
 
 template <typename _Derived>
 _Derived&
@@ -656,7 +639,7 @@ LieGroupBase<_Derived>::operator *=(
   return derived();
 }
 
-/// Static helpers
+// Static helpers
 
 template <typename _Derived>
 typename LieGroupBase<_Derived>::LieGroup
@@ -673,7 +656,7 @@ LieGroupBase<_Derived>::Random()
   return LieGroup().setRandom();
 }
 
-/// Utils
+// Utils
 
 template <typename _Stream, typename _Derived>
 _Stream& operator << (

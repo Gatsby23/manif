@@ -5,13 +5,13 @@
 #include "manif/impl/lie_group_base.h"
 #include "manif/impl/so3/SO3_map.h"
 
+#include <Eigen/Geometry>
+
 namespace manif {
 
-////////////////
-///          ///
-/// LieGroup ///
-///          ///
-////////////////
+//
+// LieGroup
+//
 
 /**
  * @brief The base class of the SE3 group.
@@ -36,6 +36,7 @@ public:
   using Rotation       = typename internal::traits<_Derived>::Rotation;
   using Translation    = typename internal::traits<_Derived>::Translation;
   using Transformation = typename internal::traits<_Derived>::Transformation;
+  using Isometry       = Eigen::Transform<Scalar, 3, Eigen::Isometry>;
 
   using QuaternionDataType = Eigen::Quaternion<Scalar>;
 
@@ -56,6 +57,14 @@ public:
    * @note See Eq. (173) & Eq. (79,179,180) and following notes.
    * @see SE3Tangent.
    */
+  Tangent log(OptJacobianRef J_t_m = {}) const;
+
+  /**
+   * @brief This function is deprecated.
+   * Please considere using
+   * @ref log instead.
+   */
+  MANIF_DEPRECATED
   Tangent lift(OptJacobianRef J_t_m = {}) const;
 
   /**
@@ -85,7 +94,6 @@ public:
       tl::optional<Eigen::Ref<Eigen::Matrix<Scalar, 3, 6>>> J_vout_m = {},
       tl::optional<Eigen::Ref<Eigen::Matrix<Scalar, 3, 3>>> J_vout_v = {}) const;
 
-
   /**
    * @brief Get the adjoint matrix of SE3 at this.
    * @note See Eq. (175).
@@ -100,6 +108,13 @@ public:
    *           | 0 1 |
    */
   Transformation transform() const;
+
+  /**
+   * Get the isometry object (Eigen 3D isometry).
+   * @note T = | R t |
+   *           | 0 1 |
+   */
+  Isometry isometry() const;
 
   /**
    * @brief Get the rotational part of this as a rotation matrix.
@@ -135,6 +150,11 @@ public:
   //Scalar pitch() const;
   //Scalar yaw() const;
 
+  /**
+   * @brief Normalize the underlying quaternion.
+   */
+  void normalize();
+
 protected:
 
   using Base::coeffs_nonconst;
@@ -160,6 +180,13 @@ SE3Base<_Derived>::transform() const
   T.template topLeftCorner<3,3>()  = rotation();
   T.template topRightCorner<3,1>() = translation();
   return T;
+}
+
+template <typename _Derived>
+typename SE3Base<_Derived>::Isometry
+SE3Base<_Derived>::isometry() const
+{
+  return Isometry(transform());
 }
 
 template <typename _Derived>
@@ -200,12 +227,12 @@ SE3Base<_Derived>::inverse(OptJacobianRef J_minv_m) const
 
 template <typename _Derived>
 typename SE3Base<_Derived>::Tangent
-SE3Base<_Derived>::lift(OptJacobianRef J_t_m) const
+SE3Base<_Derived>::log(OptJacobianRef J_t_m) const
 {
   using std::abs;
   using std::sqrt;
 
-  const SO3Tangent<Scalar> so3tan = asSO3().lift();
+  const SO3Tangent<Scalar> so3tan = asSO3().log();
 
   Tangent tan((typename Tangent::DataType() <<
                so3tan.ljac().inverse()*translation(),
@@ -218,6 +245,13 @@ SE3Base<_Derived>::lift(OptJacobianRef J_t_m) const
   }
 
   return tan;
+}
+
+template <typename _Derived>
+typename SE3Base<_Derived>::Tangent
+SE3Base<_Derived>::lift(OptJacobianRef J_t_m) const
+{
+  return log(J_t_m);
 }
 
 template <typename _Derived>
@@ -236,7 +270,7 @@ SE3Base<_Derived>::compose(
 
   if (J_mc_ma)
   {
-    (*J_mc_ma) = m.adj().inverse();
+    (*J_mc_ma) = m.inverse().adj();
   }
 
   if (J_mc_mb)
@@ -301,7 +335,7 @@ SE3Base<_Derived>::adj() const
   return Adj;
 }
 
-/// SE3 specific function
+// SE3 specific function
 
 template <typename _Derived>
 typename SE3Base<_Derived>::Scalar
@@ -324,6 +358,48 @@ SE3Base<_Derived>::z() const
   return coeffs().z();
 }
 
+template <typename _Derived>
+void SE3Base<_Derived>::normalize()
+{
+  coeffs_nonconst().template tail<4>().normalize();
+}
+
+namespace internal {
+
+//! @brief Random specialization for SE3Base objects.
+template <typename Derived>
+struct RandomEvaluatorImpl<SE3Base<Derived>>
+{
+  template <typename T>
+  static void run(T& m)
+  {
+    // @note:
+    // Quaternion::UnitRandom is not available in Eigen 3.3-beta1
+    // which is the default version in Ubuntu 16.04
+    // So we copy its implementation here.
+
+    using std::sqrt;
+    using std::sin;
+    using std::cos;
+
+    using Scalar      = typename SE3Base<Derived>::Scalar;
+    using Translation = typename SE3Base<Derived>::Translation;
+    using Quaternion  = typename SE3Base<Derived>::QuaternionDataType;
+
+    const Scalar u1 = Eigen::internal::random<Scalar>(0, 1),
+                 u2 = Eigen::internal::random<Scalar>(0, 2*EIGEN_PI),
+                 u3 = Eigen::internal::random<Scalar>(0, 2*EIGEN_PI);
+    const Scalar a = sqrt(1. - u1),
+                 b = sqrt(u1);
+
+    m = Derived(Translation::Random(),
+                Quaternion(a * sin(u2), a * cos(u2), b * sin(u3), b * cos(u3)));
+
+    //m = Derived(Translation::Random(), Quaternion::UnitRandom());
+  }
+};
+
+} /* namespace internal */
 } /* namespace manif */
 
 #endif /* _MANIF_MANIF_SE3_BASE_H_ */

@@ -13,8 +13,8 @@ namespace manif {
 template <typename T>
 T pi2pi(T angle)
 {
-  while (angle > T(M_PI))   angle -= T(2. * M_PI);
-  while (angle <= T(-M_PI)) angle += T(2. * M_PI);
+  while (angle > T(MANIF_PI))   angle -= T(2. * MANIF_PI);
+  while (angle <= T(-MANIF_PI)) angle += T(2. * MANIF_PI);
 
   return angle;
 }
@@ -39,6 +39,17 @@ template<typename T>
 constexpr T toDeg(const T rad)
 {
   return rad * Constants<T>::to_deg;
+}
+
+/**
+ * @brief Degree 2 polynomial approximation of 1/sqrt(x) (reciprocal sqrt).
+ * @param[in] x
+ * @return ~1/sqrt(x)
+ */
+template <typename T>
+constexpr T approxSqrtInv(const T x)
+{
+  return (T(15) / T(8)) - (T(5) / T(4)) * x + (T(3) / T(8)) * x * x;
 }
 
 } /* namespace manif */

@@ -1,7 +1,7 @@
 /**
- * \file se3_sam.cpp
+ * \file se3_sam_selfcalib.cpp
  *
- *  Created on: Dec 13, 2018
+ *  Created on: Aug 19, 2019
  *      \author: jsola
  *
  *  ------------------------------------------------------------
@@ -17,14 +17,13 @@
  *  ------------------------------------------------------------
  *  Demonstration example:
  *
- *  3D smoothing and mapping (SAM).
+ *  3D smoothing and mapping (SAM) with sensor self-calibration.
  *
- *  See se2_sam.cpp          for a 2D version of this example.
- *  See se3_localization.cpp for a simpler localization example using EKF.
+ *  See se3_sam.cpp          for a version of this example without self-calibration.
  *  ------------------------------------------------------------
  *
  *  This demo corresponds to the 3D version of the application
- *  in chapter V, section B, in the paper Sola-18,
+ *  in chapter V, section C, in the paper Sola-18,
  *  [https://arxiv.org/abs/1812.01537].
  *
  *  The following is an abstract of the content of the paper.
@@ -47,8 +46,9 @@
  *  The control signal u is a twist in se(3) comprising longitudinal
  *  velocity vx and angular velocity wz, with no other velocity
  *  components, integrated over the sampling time dt.
+ *  The control suffers from unknown offsets which want to be calibrated, c = (vc, wc), in the two variables of interest, vx*dt, w*dt.
  *
- *      u = (vx*dt, 0, 0, 0, 0, w*dt)
+ *      u = (vx*dt + vc, 0, 0, 0, 0, w*dt + wc)
  *
  *  The control is corrupted by additive Gaussian noise u_noise,
  *  with covariance
@@ -81,7 +81,7 @@
  *  landmarks are observed from each pose.
  *  These pairs can be observed in the factor graph, as follows.
  *
- *  The factor graph of the SAM problem looks like this:
+ *  The factor graph of the SAM problem looks like this (calibration params not shown):
  *
  *                  ------- b1
  *          b3    /         |
@@ -100,6 +100,7 @@
  *      - motion measurements from X_i to X_j
  *      - landmark measurements from X_i to b_k
  *      - absolute pose measurement from X0 to * (the origin of coordinates)
+ *    - c are the calibration parameters
  *
  *  We thus declare 9 factors pose---landmark, as follows:
  *
@@ -119,6 +120,7 @@
  *
  *      Xi  : robot pose at time i, SE(3)
  *      u   : robot control, (v*dt; 0; 0; 0; 0; w*dt) in se(3)
+ *      c   : control offset to be calibrated
  *      Q   : control perturbation covariance
  *      b   : landmark position, R^3
  *      y   : Cartesian landmark measurement in robot frame, R^3
@@ -127,19 +129,20 @@
  *
  *  We define the state to estimate as a manifold composite:
  *
- *      X in  < SE3, SE3, SE3, R^3, R^3, R^3, R^3, R^3 >
+ *      X in  < R^2, SE3, SE3, SE3, R^3, R^3, R^3, R^3, R^3 >
  *
- *      X  =  <  X0,  X1,  X2,  b0,  b1,  b2,  b3,  b4 >
+ *      X  =  <  c ,  X0,  X1,  X2,  b0,  b1,  b2,  b3,  b4 >
  *
  *  The estimation error dX is expressed
  *  in the tangent space at X,
  *
- *      dX in  < se3, se3, se3, R^3, R^3, R^3, R^3, R^3 >
- *          ~  < R^6, R^6, R^6, R^3, R^3, R^3, R^3, R^3 > = R^33
+ *      dX in  < R^2, se3, se3, se3, R^3, R^3, R^3, R^3, R^3 >
+ *          ~  < R^2, R^6, R^6, R^6, R^3, R^3, R^3, R^3, R^3 > = R^35
  *
- *      dX  =  [ dx0, dx1, dx2, db0, db1, db2, db3, db4 ] in R^33
+ *      dX  =  [ dc, dx0, dx1, dx2, db0, db1, db2, db3, db4 ] in R^35
  *
  *  with
+ *      dc  : calibration error in R^2
  *      dx_i: pose error in se(3) ~ R^6
  *      db_k: landmark error in R^3
  *
@@ -176,7 +179,6 @@
  */
 
 
-
 // manif
 #include "manif/SE3.h"
 
@@ -208,8 +210,9 @@ using namespace Eigen;
 using manif::SE3d;
 using manif::SE3Tangentd;
 
-static constexpr int DoF = SE3d::DoF;
-static constexpr int Dim = SE3d::Dim;
+constexpr int DoF = SE3d::DoF;
+constexpr int Dim = SE3d::Dim;
+constexpr int DimC = 2;                  // dimension of the calibration params
 
 // Define many data types (Tangent refers to the tangent of SE3)
 typedef Array<double,  DoF, 1>      ArrayT;     // tangent-size array
@@ -221,21 +224,23 @@ typedef Matrix<double, Dim, 1>      VectorY;    // measurement-size vector
 typedef Matrix<double, Dim, Dim>    MatrixY;    // measurement-size square matrix
 typedef Matrix<double, Dim, DoF>    MatrixYT;   // measurement x tangent size matrix
 typedef Matrix<double, Dim, Dim>    MatrixYB;   // measurement x landmark size matrix
+typedef Matrix<double, DimC, 1>     VectorC;    // offset-size vector
+typedef Matrix<double, DoF, DimC>   MatrixTC;   // Tangent x offset size matrix
 
 // some experiment constants
-static const int NUM_POSES      = 3;
-static const int NUM_LMKS       = 5;
-static const int NUM_FACTORS    = 9;
-static const int NUM_STATES     = NUM_POSES * DoF + NUM_LMKS    * Dim;
-static const int NUM_MEAS       = NUM_POSES * DoF + NUM_FACTORS * Dim;
-static const int MAX_ITER       = 20;           // for the solver
+constexpr int NUM_POSES      = 3;
+constexpr int NUM_LMKS       = 5;
+constexpr int NUM_FACTORS    = 9;
+constexpr int NUM_STATES     = DimC + NUM_POSES * DoF + NUM_LMKS    * Dim;
+constexpr int NUM_MEAS       =        NUM_POSES * DoF + NUM_FACTORS * Dim;
+constexpr int MAX_ITER       = 20;           // for the solver
 
 int main()
 {
     // DEBUG INFO
     cout << endl;
-    cout << "3D Smoothing and Mapping. 3 poses, 5 landmarks." << endl;
-    cout << "-----------------------------------------------" << endl;
+    cout << "3D Smoothing and Mapping. Sensor offset, 3 poses, 5 landmarks." << endl;
+    cout << "--------------------------------------------------------------" << endl;
     cout << std::fixed   << std::setprecision(3) << std::showpos;
 
     // START CONFIGURATION
@@ -252,19 +257,27 @@ int main()
     X_simu.setIdentity();
 
 
-    // Define a control vector and its noise and covariance in the tangent of SE3
+    // Define a control vector, its noise and covariance in the tangent of SE3, and its offset model
     SE3Tangentd         u;          // control signal, generic
     SE3Tangentd         u_nom;      // nominal control signal
+    SE3Tangentd         u_offset;   // control signal offset
     ArrayT              u_sigmas;   // control noise std specification
     VectorT             u_noise;    // control noise
     MatrixT             Q;          // Covariance
     MatrixT             W;          // sqrt Info
     vector<SE3Tangentd> controls;   // robot controls
+    VectorC             c, c_simu;  // offset to calibrate, and ground truth value
+    MatrixTC            J_u_c;      // linear model of offset: u = u_nom + J_u_c * c
 
-    u_nom    << 0.1, 0.0, 0.0, 0.0, 0.0, 0.05;
+    u_nom    << 0.2, 0.0, 0.0, 0.0, 0.0, 0.1;
     u_sigmas << 0.01, 0.01, 0.01, 0.01, 0.01, 0.01;
     Q        = (u_sigmas * u_sigmas).matrix().asDiagonal();
     W        =  u_sigmas.inverse()  .matrix().asDiagonal(); // this is Q^(-T/2)
+    c_simu   << 0.05, 0.10;         // ground truth offset
+    c        << 0.0, 0.0;           // initial estimate of offset
+    J_u_c.setZero();                // linear model of offset: u = u_nom + J_u_c * c
+    J_u_c(0,0) = 1.0;               // add offset to linear X-velocity
+    J_u_c(5,1) = 1.0;               // add offset to angular yaw-rate
 
     // Landmarks in R^3 and map
     VectorB b; // Landmark, generic
@@ -287,11 +300,11 @@ int main()
     // Define the beacon's measurements in R^3
     VectorY             y, y_noise;
     ArrayY              y_sigmas;
-    MatrixY             R; // Covariance
-    MatrixY             S; // sqrt Info
+    MatrixY             R;          // Covariance
+    MatrixY             S;          // sqrt Info
     vector<map<int,VectorY>>    measurements(NUM_POSES); // y = measurements[pose_id][lmk_id]
 
-    y_sigmas << 0.001, 0.001, 0.001; y_sigmas /= 1.0;
+    y_sigmas << 0.001, 0.001, 0.001;
     R        = (y_sigmas * y_sigmas).matrix().asDiagonal();
     S        =  y_sigmas.inverse()  .matrix().asDiagonal(); // this is R^(-T/2)
 
@@ -305,6 +318,7 @@ int main()
     MatrixYB        J_e_b;          // Jacobian of measurement expectation wrt lmk
     SE3Tangentd     dx;             // optimal pose correction step
     VectorB         db;             // optimal landmark correction step
+    VectorC         dc;             // optimal calibration offset correction step
 
     // Problem-size variables
     Matrix<double, NUM_STATES, 1>           dX; // optimal update step for all the SAM problem
@@ -361,7 +375,7 @@ int main()
         for (const auto& k : pairs[i])
         {
             // simulate measurement
-            b       = landmarks_simu[k];              // lmk coordinates in world frame
+            b       = landmarks_simu[k];                // lmk coordinates in world frame
             y_noise = y_sigmas * ArrayY::Random();      // measurement noise
             y       = X_simu.inverse().act(b);          // landmark measurement, before adding noise
 
@@ -374,12 +388,13 @@ int main()
         // make motions
         if (i < NUM_POSES - 1) // do not make the last motion since we're done after 3rd pose
         {
-            // move simulator, without noise
-            X_simu = X_simu + u_nom;
+            // move simulator, without noise, but with offset
+            u_offset    = J_u_c * c_simu;
+            X_simu      = X_simu + (u_nom + u_offset);
 
-            // move prior, with noise
-            u_noise = u_sigmas * ArrayT::Random();
-            Xi = Xi + (u_nom + u_noise);
+            // move prior, with noise, but without offset
+            u_noise     = u_sigmas * ArrayT::Random();
+            Xi          = Xi + (u_nom + u_noise);
 
             // store
             poses_simu. push_back(X_simu);
@@ -392,10 +407,11 @@ int main()
 
     // DEBUG INFO
     cout << "prior" << std::showpos << endl;
+    cout << "offset: " << c.transpose() << endl;
     for (const auto& X : poses)
         cout << "pose  : " << X.translation().transpose() << " " << X.asSO3().log() << endl;
     for (const auto& b : landmarks)
-        cout << "lmk : " << b.transpose() << endl;
+        cout << "lmk   : " << b.transpose() << endl;
     cout << "-----------------------------------------------" << endl;
 
 
@@ -469,7 +485,7 @@ int main()
         //   We have residual = expectation - measurement, in global tangent space
         //   We have the Jacobian in J_r_p0 = J.block<DoF, DoF>(row, col);
         // We compute the whole in a one-liner:
-        r.segment<DoF>(row)         = poses[0].lminus(SE3d::Identity(), J.block<DoF, DoF>(row, col)).coeffs();
+        r.segment<DoF>(row) = poses[0].lminus(SE3d::Identity(), J.block<DoF, DoF>(row, DimC + col)).coeffs();
 
         // advance rows
         row += DoF;
@@ -491,14 +507,19 @@ int main()
                 d  = Xj.rminus(Xi, J_d_xj, J_d_xi); // expected motion = Xj (-) Xi
 
                 // residual
-                r.segment<DoF>(row)         = W * (d - u).coeffs(); // residual
+                SE3Tangentd u_corr          = u + J_u_c * c;             // correct control with known offset
+                r.segment<DoF>(row)         = W * (d - u_corr).coeffs(); // residual
+
+                // Jacobian of residual wrt calibration params
+                col = 0;
+                J.block<DoF, DimC>(row, col) = - W * J_u_c;
 
                 // Jacobian of residual wrt first pose
-                col = i * DoF;
+                col = DimC + i * DoF;
                 J.block<DoF, DoF>(row, col) = W * J_d_xi;
 
                 // Jacobian of residual wrt second pose
-                col = j * DoF;
+                col = DimC + j * DoF;
                 J.block<DoF, DoF>(row, col) = W * J_d_xj;
 
                 // advance rows
@@ -521,11 +542,11 @@ int main()
                 r.segment<Dim>(row)         = S * (e - y);
 
                 // Jacobian of residual wrt pose
-                col = i * DoF;
+                col = DimC + i * DoF;
                 J.block<Dim, DoF>(row, col) = S * J_e_x;
 
                 // Jacobian of residual wrt lmk
-                col = NUM_POSES * DoF + k * Dim;
+                col = DimC + NUM_POSES * DoF + k * Dim;
                 J.block<Dim, Dim>(row, col) = S * J_e_b;
 
                 // advance rows
@@ -534,6 +555,7 @@ int main()
 
         }
 
+
         // 4. Solve -----------------------------------------------------------------
 
         // compute optimal step
@@ -541,21 +563,25 @@ int main()
         // ATTENTION: Use QR factorization and column reordering for larger problems!!
         dX = - (J.transpose() * J).inverse() * J.transpose() * r;
 
+        // update calibrated offset
+        dc = dX.head<DimC>();
+        c  = c + dc;
+
         // update all poses
         for (int i = 0; i < NUM_POSES; ++i)
         {
             // we go very verbose here
-            int row             = i * DoF;
+            int row             = DimC + i * DoF;
             constexpr int size  = DoF;
             dx                  = dX.segment<size>(row);
-            poses[i]            = poses[i] + dx;
+            poses[i]            = poses[i] + dx;            // Overload poses[i].plus(dx)
         }
 
         // update all landmarks
         for (int k = 0; k < NUM_LMKS; ++k)
         {
             // we go very verbose here
-            int row             = NUM_POSES * DoF + k * Dim;
+            int row             = DimC + NUM_POSES * DoF + k * Dim;
             constexpr int size  = Dim;
             db                  = dX.segment<size>(row);
             landmarks[k]        = landmarks[k] + db;
@@ -577,18 +603,20 @@ int main()
 
     // solved problem
     cout << "posterior" << std::showpos << endl;
+    cout << "offset: " << c.transpose() << endl;
     for (const auto& X : poses)
         cout << "pose  : " << X.translation().transpose() << " " << X.asSO3().log() << endl;
     for (const auto& b : landmarks)
-        cout << "lmk : " << b.transpose() << endl;
+        cout << "lmk   : " << b.transpose() << endl;
     cout << "-----------------------------------------------" << endl;
 
     // ground truth
     cout << "ground truth" << std::showpos << endl;
+    cout << "offset: " << c_simu.transpose() << endl;
     for (const auto& X : poses_simu)
         cout << "pose  : " << X.translation().transpose() << " " << X.asSO3().log() << endl;
     for (const auto& b : landmarks_simu)
-        cout << "lmk : " << b.transpose() << endl;
+        cout << "lmk   : " << b.transpose() << endl;
     cout << "-----------------------------------------------" << endl;
 
     return 0;

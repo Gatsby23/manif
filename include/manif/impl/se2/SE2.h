@@ -33,7 +33,7 @@ struct traits<SE2<_Scalar>>
   using Transformation = Eigen::Matrix<Scalar, 3, 3>;
   using Rotation       = Eigen::Matrix<Scalar, Dim, Dim>;
   using Translation    = Eigen::Matrix<Scalar, Dim, 1>;
-  using Vector         = Eigen::Matrix<Scalar, DoF, 1>;
+  using Vector         = Eigen::Matrix<Scalar, Dim, 1>;
 };
 
 } /* namespace internal */
@@ -41,11 +41,9 @@ struct traits<SE2<_Scalar>>
 
 namespace manif {
 
-////////////////
-///          ///
-/// LieGroup ///
-///          ///
-////////////////
+//
+// LieGroup
+//
 
 /**
  * @brief Represents an element of SE2.
@@ -61,7 +59,9 @@ private:
 public:
 
   MANIF_COMPLETE_GROUP_TYPEDEF
+  using Translation = typename Base::Translation;
   MANIF_INHERIT_GROUP_API
+  using Base::normalize;
 
   SE2()  = default;
   ~SE2() = default;
@@ -79,14 +79,59 @@ public:
   template <typename _EigenDerived>
   SE2(const Eigen::MatrixBase<_EigenDerived>& data);
 
+  /**
+   * @brief Constructor given a translation and a unit complex number.
+   * @param[in] t A translation vector.
+   * @param[in] c A complex number.
+   * @throws manif::invalid_argument on un-normalized complex number.
+   */
+  SE2(const Translation& t, const std::complex<Scalar>& c);
+
+  /**
+   * @brief Constructor given the x and y components of the translational part
+   * and an angle.
+   * @param[in] x The x-components of the translational part.
+   * @param[in] y The y-components of the translational part.
+   * @param[in] c An angle.
+   */
   SE2(const Scalar x, const Scalar y, const Scalar theta);
+
+  /**
+   * @brief Constructor given the x and y components of the translational part
+   * and the real and imaginary part of a unit complex number.
+   * @param[in] x The x-components of the translational part.
+   * @param[in] y The y-components of the translational part.
+   * @param[in] real The real of a unitary complex number.
+   * @param[in] imag The imaginary of a unitary complex number.
+   * @throws manif::invalid_argument on un-normalized complex number.
+   */
   SE2(const Scalar x, const Scalar y, const Scalar real, const Scalar imag);
 
-  /// LieGroup common API
+  /**
+   * @brief Constructor given the x and y components of the translational part
+   * and the real and imaginary part of a unit complex number.
+   * @param[in] x The x-components of the translational part.
+   * @param[in] y The y-components of the translational part.
+   * @param[in] c The unitary complex number.
+   * @throws manif::invalid_argument on un-normalized complex number.
+   */
+  SE2(const Scalar x, const Scalar y, const std::complex<Scalar>& c);
+
+  /**
+   * @brief Constructor from a 2D Eigen::Isometry<Scalar>
+   * @param[in] h an isometry object from Eigen
+   *
+   * Isometry is a typedef from Eigen::Transform,
+   * in which the linear part is assumed a rotation matrix.
+   * This is used to speed up certain methods of Transform, especially inverse().
+   */
+  SE2(const Eigen::Transform<_Scalar,2,Eigen::Isometry>& h);
+
+  // LieGroup common API
 
   const DataType& coeffs() const;
 
-  /// SE2 specific API
+  // SE2 specific API
 
   using Base::angle;
   using Base::real;
@@ -96,7 +141,7 @@ public:
 
 protected:
 
-  friend class LieGroupBase<SE2<Scalar>>;
+  friend struct LieGroupBase<SE2<Scalar>>;
   DataType& coeffs_nonconst();
 
   DataType data_;
@@ -105,8 +150,20 @@ protected:
 MANIF_EXTRA_GROUP_TYPEDEF(SE2)
 
 template <typename _Scalar>
+template <typename _EigenDerived>
+SE2<_Scalar>::SE2(const Eigen::MatrixBase<_EigenDerived>& data)
+  : data_(data)
+{
+  using std::abs;
+  MANIF_CHECK(abs(data_.template tail<2>().norm()-Scalar(1)) <
+              Constants<Scalar>::eps_s,
+              "SE2 constructor argument not normalized !",
+              invalid_argument);
+}
+
+template <typename _Scalar>
 SE2<_Scalar>::SE2(const Base& o)
-  : data_(o.coeffs())
+  : SE2(o.coeffs())
 {
   //
 }
@@ -115,7 +172,7 @@ template <typename _Scalar>
 template <typename _DerivedOther>
 SE2<_Scalar>::SE2(
     const SE2Base<_DerivedOther>& o)
-  : data_(o.coeffs())
+  : SE2(o.coeffs())
 {
   //
 }
@@ -124,15 +181,15 @@ template <typename _Scalar>
 template <typename _DerivedOther>
 SE2<_Scalar>::SE2(
     const LieGroupBase<_DerivedOther>& o)
-  : data_(o.coeffs())
+  : SE2(o.coeffs())
 {
   //
 }
 
 template <typename _Scalar>
-template <typename _EigenDerived>
-SE2<_Scalar>::SE2(const Eigen::MatrixBase<_EigenDerived>& data)
-  : data_(data)
+SE2<_Scalar>::SE2(const Translation& t,
+                  const std::complex<Scalar>& c)
+  : SE2((DataType() << t, c.real(), c.imag()).finished())
 {
   //
 }
@@ -149,6 +206,20 @@ template <typename _Scalar>
 SE2<_Scalar>::SE2(const Scalar x, const Scalar y,
                   const Scalar real, const Scalar imag)
   : SE2(DataType(x, y, real, imag))
+{
+  //
+}
+
+template <typename _Scalar>
+SE2<_Scalar>::SE2(const Scalar x, const Scalar y, const std::complex<Scalar>& c)
+  : SE2(x, y, c.real(), c.imag())
+{
+  //
+}
+
+template <typename _Scalar>
+SE2<_Scalar>::SE2(const Eigen::Transform<_Scalar,2,Eigen::Isometry>& h)
+  : SE2(h.translation().x(), h.translation().y(), Eigen::Rotation2D<Scalar>(h.rotation()).angle())
 {
   //
 }

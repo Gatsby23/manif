@@ -7,11 +7,9 @@
 
 namespace manif {
 
-////////////////
-///          ///
-/// LieGroup ///
-///          ///
-////////////////
+//
+// LieGroup
+//
 
 /**
  * @brief The base class of the SO3 group.
@@ -54,6 +52,14 @@ public:
    * @note See Eq. (133) & Eq. (144).
    * @see SO3Tangent.
    */
+  Tangent log(OptJacobianRef J_t_m = {}) const;
+
+  /**
+   * @brief This function is deprecated.
+   * Please considere using
+   * @ref log instead.
+   */
+  MANIF_DEPRECATED
   Tangent lift(OptJacobianRef J_t_m = {}) const;
 
   /**
@@ -114,11 +120,14 @@ public:
   //! @brief Get quaternion.
   QuaternionDataType quat() const;
 
+  /**
+   * @brief Normalize the underlying quaternion.
+   */
+  void normalize();
+
 protected:
 
   using Base::coeffs_nonconst;
-
-  void normalize();
 };
 
 template <typename _Derived>
@@ -154,13 +163,13 @@ SO3Base<_Derived>::inverse(OptJacobianRef J_minv_m) const
 
 template <typename _Derived>
 typename SO3Base<_Derived>::Tangent
-SO3Base<_Derived>::lift(OptJacobianRef J_t_m) const
+SO3Base<_Derived>::log(OptJacobianRef J_t_m) const
 {
   using std::sqrt;
   using std::atan2;
 
   Tangent tan;
-  Scalar lift_coeff;
+  Scalar log_coeff;
 
   const Scalar sin_angle_squared = coeffs().template head<3>().squaredNorm();
   if (sin_angle_squared > Constants<Scalar>::eps)
@@ -182,15 +191,15 @@ SO3Base<_Derived>::lift(OptJacobianRef J_t_m) const
                                  atan2(-sin_angle, -cos_angle) :
                                  atan2( sin_angle,  cos_angle));
 
-    lift_coeff = two_angle / sin_angle;
+    log_coeff = two_angle / sin_angle;
   }
   else
   {
     // small-angle approximation
-    lift_coeff = Scalar(2.0);
+    log_coeff = Scalar(2.0);
   }
 
-  tan = Tangent(coeffs().template head<3>() * lift_coeff);
+  tan = Tangent(coeffs().template head<3>() * log_coeff);
 
 //  using std::atan2;
 //  Scalar n = coeffs().template head<3>().norm();
@@ -225,6 +234,13 @@ SO3Base<_Derived>::lift(OptJacobianRef J_t_m) const
 }
 
 template <typename _Derived>
+typename SO3Base<_Derived>::Tangent
+SO3Base<_Derived>::lift(OptJacobianRef J_t_m) const
+{
+  return log(J_t_m);
+}
+
+template <typename _Derived>
 template <typename _DerivedOther>
 typename SO3Base<_Derived>::LieGroup
 SO3Base<_Derived>::compose(
@@ -232,6 +248,8 @@ SO3Base<_Derived>::compose(
     OptJacobianRef J_mc_ma,
     OptJacobianRef J_mc_mb) const
 {
+  using std::abs;
+
   static_assert(
     std::is_base_of<SO3Base<_DerivedOther>, _DerivedOther>::value,
     "Argument does not inherit from S03Base !");
@@ -246,7 +264,17 @@ SO3Base<_Derived>::compose(
   if (J_mc_mb)
     J_mc_mb->setIdentity();
 
-  return LieGroup(quat() * m_SO3.quat());
+  QuaternionDataType ret_q = quat() * m_SO3.quat();
+
+  const Scalar ret_sqnorm = ret_q.squaredNorm();
+
+  if (abs(ret_sqnorm-Scalar(1)) > Constants<Scalar>::eps_s)
+  {
+    const Scalar scale = approxSqrtInv(ret_sqnorm);
+    ret_q.coeffs() *= scale;
+  }
+
+  return LieGroup(ret_q);
 }
 
 template <typename _Derived>
@@ -279,7 +307,7 @@ SO3Base<_Derived>::adj() const
   return rotation();
 }
 
-/// SO3 specific
+// SO3 specific
 
 template <typename _Derived>
 typename SO3Base<_Derived>::Scalar
@@ -319,9 +347,44 @@ SO3Base<_Derived>::quat() const
 template <typename _Derived>
 void SO3Base<_Derived>::normalize()
 {
-  coeffs().normalize();
+  coeffs_nonconst().normalize();
 }
 
+namespace internal {
+
+//! @brief Random specialization for SO3Base objects.
+template <typename Derived>
+struct RandomEvaluatorImpl<SO3Base<Derived>>
+{
+  template <typename T>
+  static void run(T& m)
+  {
+
+    // @note:
+    // Quaternion::UnitRandom is not available in Eigen 3.3-beta1
+    // which is the default version in Ubuntu 16.04
+    // So we copy its implementation here.
+
+    using std::sqrt;
+    using std::sin;
+    using std::cos;
+
+    using Scalar = typename SO3Base<Derived>::Scalar;
+    using Quaternion = typename SO3Base<Derived>::QuaternionDataType;
+
+    const Scalar u1 = Eigen::internal::random<Scalar>(0, 1),
+                 u2 = Eigen::internal::random<Scalar>(0, 2*EIGEN_PI),
+                 u3 = Eigen::internal::random<Scalar>(0, 2*EIGEN_PI);
+    const Scalar a = sqrt(1. - u1),
+                 b = sqrt(u1);
+    m = Derived(Quaternion(a * sin(u2), a * cos(u2), b * sin(u3), b * cos(u3)));
+
+
+    // m = Derived(Quaternion::UnitRandom());
+  }
+};
+
+} /* namespace internal */
 } /* namespace manif */
 
 #endif /* _MANIF_MANIF_SO3_BASE_H_ */

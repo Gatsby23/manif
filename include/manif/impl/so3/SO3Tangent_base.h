@@ -6,11 +6,9 @@
 
 namespace manif {
 
-///////////////
-///         ///
-/// Tangent ///
-///         ///
-///////////////
+//
+// Tangent
+//
 
 /**
  * @brief The base class of the SO3 tangent.
@@ -31,7 +29,7 @@ public:
   MANIF_TANGENT_TYPEDEF
   MANIF_INHERIT_TANGENT_OPERATOR
 
-  /// Tangent common API
+  // Tangent common API
 
   using Base::coeffs;
 
@@ -52,6 +50,14 @@ public:
    * @note This is the exp() map with the argument in vector form.
    * @note See Eq. (132) and Eq. (143).
    */
+  LieGroup exp(OptJacobianRef J_m_t = {}) const;
+
+  /**
+   * @brief This function is deprecated.
+   * Please considere using
+   * @ref exp instead.
+   */
+  MANIF_DEPRECATED
   LieGroup retract(OptJacobianRef J_m_t = {}) const;
 
   /**
@@ -98,7 +104,7 @@ public:
 
 template <typename _Derived>
 typename SO3TangentBase<_Derived>::LieGroup
-SO3TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
+SO3TangentBase<_Derived>::exp(OptJacobianRef J_m_t) const
 {
   using std::sqrt;
   using std::cos;
@@ -133,6 +139,13 @@ SO3TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
 
     return LieGroup(x()/Scalar(2), y()/Scalar(2), z()/Scalar(2), Scalar(1));
   }
+}
+
+template <typename _Derived>
+typename SO3TangentBase<_Derived>::LieGroup
+SO3TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
+{
+  return exp(J_m_t);
 }
 
 template <typename _Derived>
@@ -211,7 +224,7 @@ SO3TangentBase<_Derived>::hat() const
   return skew(coeffs());
 }
 
-/// SO3Tangent specifics
+// SO3Tangent specifics
 
 template <typename _Derived>
 typename SO3TangentBase<_Derived>::Scalar
@@ -236,15 +249,13 @@ SO3TangentBase<_Derived>::z() const
 
 namespace internal {
 
+//! @brief Generator specialization for SO3TangentBase objects.
 template <typename Derived>
 struct GeneratorEvaluator<SO3TangentBase<Derived>>
 {
   static typename SO3TangentBase<Derived>::LieAlg
   run(const int i)
   {
-    MANIF_CHECK(i>=0 && i<SO3TangentBase<Derived>::DoF,
-                "Index i must be in [0,2]!");
-
     using LieAlg = typename SO3TangentBase<Derived>::LieAlg;
     using Scalar = typename SO3TangentBase<Derived>::Scalar;
 
@@ -275,11 +286,22 @@ struct GeneratorEvaluator<SO3TangentBase<Derived>>
         return E2;
       }
       default:
-        MANIF_THROW("Index i must be in [0,2]!");
+        MANIF_THROW("Index i must be in [0,2]!", invalid_argument);
         break;
     }
 
     return LieAlg{};
+  }
+};
+
+//! @brief Random specialization for SO3TangentBase objects.
+template <typename Derived>
+struct RandomEvaluatorImpl<SO3TangentBase<Derived>>
+{
+  static void run(SO3TangentBase<Derived>& m)
+  {
+    // in [-1,1]  / in [-PI,PI]
+    m.coeffs().setRandom() *= MANIF_PI;
   }
 };
 

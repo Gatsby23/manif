@@ -7,11 +7,9 @@
 
 namespace manif {
 
-////////////////
-///          ///
-/// LieGroup ///
-///          ///
-////////////////
+//
+// LieGroup
+//
 
 /**
  * @brief The base class of the SE2 group.
@@ -36,6 +34,7 @@ public:
   using Rotation       = typename internal::traits<_Derived>::Rotation;
   using Translation    = typename internal::traits<_Derived>::Translation;
   using Transformation = typename internal::traits<_Derived>::Transformation;
+  using Isometry       = Eigen::Transform<Scalar, 2, Eigen::Isometry>;
 
   // LieGroup common API
 
@@ -54,6 +53,14 @@ public:
    * @note See Eqs. (157, 158).
    * @see SE2Tangent.
    */
+  Tangent log(OptJacobianRef J_t_m = {}) const;
+
+  /**
+   * @brief This function is deprecated.
+   * Please considere using
+   * @ref log instead.
+   */
+  MANIF_DEPRECATED
   Tangent lift(OptJacobianRef J_t_m = {}) const;
 
   /**
@@ -98,6 +105,13 @@ public:
    */
   Transformation transform() const;
 
+  /**
+   * Get the isometry object (Eigen 2D isometry).
+   * @note T = | R t |
+   *           | 0 1 |
+   */
+  Isometry isometry() const;
+
   //! @brief Get the rotational part of this as a rotation matrix.
   Rotation rotation() const;
 
@@ -130,6 +144,15 @@ public:
    * @brief Get the y component of the translational part.
    */
   Scalar y() const;
+
+  /**
+   * @brief Normalize the underlying complex number.
+   */
+  void normalize();
+
+protected:
+
+  using Base::coeffs_nonconst;
 };
 
 template <typename _Derived>
@@ -141,6 +164,13 @@ SE2Base<_Derived>::transform() const
   T(0,2) = x();
   T(1,2) = y();
   return T;
+}
+
+template <typename _Derived>
+typename SE2Base<_Derived>::Isometry
+SE2Base<_Derived>::isometry() const
+{
+  return Isometry(transform());
 }
 
 template <typename _Derived>
@@ -177,7 +207,7 @@ SE2Base<_Derived>::inverse(OptJacobianRef J_minv_m) const
 
 template <typename _Derived>
 typename SE2Base<_Derived>::Tangent
-SE2Base<_Derived>::lift(OptJacobianRef J_t_m) const
+SE2Base<_Derived>::log(OptJacobianRef J_t_m) const
 {
   using std::abs;
   using std::cos;
@@ -223,6 +253,13 @@ SE2Base<_Derived>::lift(OptJacobianRef J_t_m) const
 }
 
 template <typename _Derived>
+typename SE2Base<_Derived>::Tangent
+SE2Base<_Derived>::lift(OptJacobianRef J_t_m) const
+{
+  return log(J_t_m);
+}
+
+template <typename _Derived>
 template <typename _DerivedOther>
 typename SE2Base<_Derived>::LieGroup
 SE2Base<_Derived>::compose(
@@ -230,9 +267,21 @@ SE2Base<_Derived>::compose(
     OptJacobianRef J_mc_ma,
     OptJacobianRef J_mc_mb) const
 {
+  using std::abs;
+
   static_assert(
     std::is_base_of<SE2Base<_DerivedOther>, _DerivedOther>::value,
     "Argument does not inherit from SE2Base !");
+
+  if (J_mc_ma)
+  {
+    (*J_mc_ma) = m.inverse().adj();
+  }
+
+  if (J_mc_mb)
+  {
+    J_mc_mb->setIdentity();
+  }
 
   const auto& m_se2 = static_cast<const SE2Base<_DerivedOther>&>(m);
 
@@ -241,21 +290,21 @@ SE2Base<_Derived>::compose(
   const Scalar rhs_real = m_se2.real();
   const Scalar rhs_imag = m_se2.imag();
 
-  if (J_mc_ma)
+  Scalar ret_real = lhs_real * rhs_real - lhs_imag * rhs_imag;
+  Scalar ret_imag = lhs_real * rhs_imag + lhs_imag * rhs_real;
+
+  const Scalar ret_sqnorm = ret_real*ret_real+ret_imag*ret_imag;
+
+  if (abs(ret_sqnorm-Scalar(1)) > Constants<Scalar>::eps_s)
   {
-    (*J_mc_ma) = m.adj().inverse();
+    const Scalar scale = approxSqrtInv(ret_sqnorm);
+    ret_real *= scale;
+    ret_imag *= scale;
   }
 
-  if (J_mc_mb)
-  {
-    J_mc_mb->setIdentity();
-  }
-
-  return LieGroup(
-        lhs_real * m_se2.x() - lhs_imag * m_se2.y() + x(),
-        lhs_imag * m_se2.x() + lhs_real * m_se2.y() + y(),
-        lhs_real * rhs_real  - lhs_imag * rhs_imag,
-        lhs_real * rhs_imag  + lhs_imag * rhs_real         );
+  return LieGroup(lhs_real * m_se2.x() - lhs_imag * m_se2.y() + x(),
+                  lhs_imag * m_se2.x() + lhs_real * m_se2.y() + y(),
+                  ret_real, ret_imag                                );
 }
 
 template <typename _Derived>
@@ -293,7 +342,7 @@ SE2Base<_Derived>::adj() const
   return Adj;
 }
 
-/// SE2 specific function
+// SE2 specific function
 
 template <typename _Derived>
 typename SE2Base<_Derived>::Scalar
@@ -331,6 +380,27 @@ SE2Base<_Derived>::y() const
   return coeffs().y();
 }
 
+template <typename _Derived>
+void SE2Base<_Derived>::normalize()
+{
+  coeffs_nonconst().template tail<2>().normalize();
+}
+
+namespace internal {
+
+//! @brief Random specialization for SE2Base objects
+template <typename Derived>
+struct RandomEvaluatorImpl<SE2Base<Derived>>
+{
+  template <typename T>
+  static void run(T& m)
+  {
+    using Tangent = typename LieGroupBase<Derived>::Tangent;
+    m = Tangent::Random().exp();
+  }
+};
+
+} /* namespace internal */
 } /* namespace manif */
 
 #endif /* _MANIF_MANIF_SE2_BASE_H_ */

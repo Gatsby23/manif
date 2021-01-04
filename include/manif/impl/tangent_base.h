@@ -4,6 +4,7 @@
 #include "manif/impl/macro.h"
 #include "manif/impl/traits.h"
 #include "manif/impl/generator.h"
+#include "manif/impl/random.h"
 #include "manif/impl/eigen.h"
 
 #include "manif/constants.h"
@@ -14,7 +15,7 @@ namespace manif {
 
 /**
  * @brief Base class for Lie groups' tangents.
- * @class Defines the minimum common API.
+ * Defines the minimum common API.
  * @see LieGroupBase.
  */
 template <class _Derived>
@@ -129,6 +130,15 @@ public:
    * @note This is the exp() map with the argument in vector form.
    * @note See Eq. (23).
    */
+  LieGroup exp(OptJacobianRef J_m_t =
+                OptJacobianRef{}) const;
+
+  /**
+   * @brief This function is deprecated.
+   * Please considere using
+   * @ref exp instead.
+   */
+  MANIF_DEPRECATED
   LieGroup retract(OptJacobianRef J_m_t =
                     OptJacobianRef{}) const;
 
@@ -176,17 +186,17 @@ public:
 
   /**
    * @brief Get the right Jacobian.
-   * @note this is the right Jacobian of retract(), what is commonly known as "the right Jacobian".
+   * @note this is the right Jacobian of @ref exp, what is commonly known as "the right Jacobian".
    * @note See Eq. (41) for the right Jacobian of general functions.
-   * @note See Eqs. (126,143,163,179,191) for implementations of the right Jacobian of retract().
+   * @note See Eqs. (126,143,163,179,191) for implementations of the right Jacobian of @ref exp.
    */
   Jacobian rjac() const;
 
   /**
    * @brief Get the left Jacobian.
-   * @note this is the left Jacobian of retract(), what is commonly known as "the left Jacobian".
+   * @note this is the left Jacobian of @ref exp, what is commonly known as "the left Jacobian".
    * @note See Eq. (44) for the left Jacobian of general functions.
-   * @note See Eqs. (126,145,164,179,191) for implementations of the left Jacobian of retract().
+   * @note See Eqs. (126,145,164,179,191) for implementations of the left Jacobian of @ref exp.
    */
   Jacobian ljac() const;
 
@@ -199,7 +209,7 @@ public:
   /// @note Calls Base default impl
   template <typename U = _Derived>
   typename std::enable_if<
-    not internal::has_rjacinv<U>::value,
+    ! internal::has_rjacinv<U>::value,
     typename TangentBase<U>::Jacobian>::type rjacinv() const;
 
   /// @note Calls Derived's 'overload'
@@ -211,7 +221,7 @@ public:
   /// @note Calls Base default impl
   template <typename U = _Derived>
   typename std::enable_if<
-    not internal::has_ljacinv<U>::value,
+    ! internal::has_ljacinv<U>::value,
     typename TangentBase<U>::Jacobian>::type ljacinv() const;
 
   /**
@@ -271,6 +281,10 @@ public:
    */
   template <typename _EigenDerived>
   _Derived& operator =(const Eigen::MatrixBase<_EigenDerived>& v);
+
+  template <typename T>
+  auto operator <<(T&& v)
+  ->decltype( std::declval<DataType>().operator<<(std::forward<T>(v)) );
 
   // Math
 
@@ -370,15 +384,25 @@ _Derived& TangentBase<_Derived>::setZero()
 template <class _Derived>
 _Derived& TangentBase<_Derived>::setRandom()
 {
-  coeffs().setRandom();
+  internal::RandomEvaluator<
+      typename internal::traits<_Derived>::Base>(
+        derived()).run();
+
   return derived();
+}
+
+template <class _Derived>
+typename TangentBase<_Derived>::LieGroup
+TangentBase<_Derived>::exp(OptJacobianRef J_m_t) const
+{
+  return derived().exp(J_m_t);
 }
 
 template <class _Derived>
 typename TangentBase<_Derived>::LieGroup
 TangentBase<_Derived>::retract(OptJacobianRef J_m_t) const
 {
-  return derived().retract(J_m_t);
+  return derived().exp(J_m_t);
 }
 
 template <typename _Derived>
@@ -400,7 +424,7 @@ template <typename _DerivedOther>
 typename TangentBase<_Derived>::Scalar
 TangentBase<_Derived>::inner(const TangentBase<_DerivedOther>& t) const
 {
-  return coeffs().transpose() * W() * t.coeffs();
+  return (coeffs().transpose() * W() * t.coeffs())(0);
 }
 
 template <class _Derived>
@@ -415,7 +439,7 @@ template <class _Derived>
 typename TangentBase<_Derived>::Scalar
 TangentBase<_Derived>::squaredWeightedNorm() const
 {
-  return coeffs().transpose() * W() * coeffs();
+  return (coeffs().transpose() * W() * coeffs())(0);
 }
 
 template <class _Derived>
@@ -515,7 +539,7 @@ TangentBase<_Derived>::rjacinv() const
 template <class _Derived>
 template <typename U>
 typename std::enable_if<
-  not internal::has_rjacinv<U>::value,
+  ! internal::has_rjacinv<U>::value,
   typename TangentBase<U>::Jacobian>::type
 TangentBase<_Derived>::rjacinv() const
 {
@@ -535,7 +559,7 @@ TangentBase<_Derived>::ljacinv() const
 template <class _Derived>
 template <typename U>
 typename std::enable_if<
-  not internal::has_ljacinv<U>::value,
+  ! internal::has_ljacinv<U>::value,
   typename TangentBase<U>::Jacobian>::type
 TangentBase<_Derived>::ljacinv() const
 {
@@ -609,6 +633,14 @@ _Derived& TangentBase<_Derived>::operator =(
 {
   coeffs() = v;
   return derived();
+}
+
+template <typename _Derived>
+template <typename T>
+auto TangentBase<_Derived>::operator <<(T&& v)
+->decltype( std::declval<DataType>().operator<<(std::forward<T>(v)) )
+{
+  return coeffs().operator<<(std::forward<T>(v));
 }
 
 // Static helper
@@ -811,7 +843,7 @@ bool operator ==(
   return t.isApprox(v, Constants<typename TangentBase<_Derived>::Scalar>::eps);
 }
 
-/// Utils
+// Utils
 
 template <typename _Stream, typename _Derived>
 _Stream& operator << (
